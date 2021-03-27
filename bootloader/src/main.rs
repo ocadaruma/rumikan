@@ -2,7 +2,6 @@
 #![no_main]
 #![feature(abi_efiapi)]
 
-extern crate rlibc;
 extern crate uefi;
 extern crate uefi_services;
 
