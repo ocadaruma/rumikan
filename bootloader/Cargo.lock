@@ -54,6 +54,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "rumikan-bootloader"
+version = "0.1.0"
+dependencies = [
+ "uefi",
+ "uefi-services",
+]
+
+[[package]]
 name = "syn"
 version = "1.0.65"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -122,12 +130,4 @@ checksum = "8d9164ba09d4a6744b87c540d02556722080bd7689e92b6ff008b803b1460647"
 dependencies = [
  "bit_field 0.9.0",
  "bitflags",
-]
-
-[[package]]
-name = "yamos-bootloader"
-version = "0.1.0"
-dependencies = [
- "uefi",
- "uefi-services",
 ]
