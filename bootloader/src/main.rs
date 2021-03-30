@@ -40,7 +40,7 @@ fn efi_main(image_handle: uefi::Handle,
 
     info!("kernel entry_addr: 0x{:x}", entry_addr);
 
-    let entry_point: extern "efiapi" fn(u64, usize) = unsafe { core::mem::transmute(entry_addr) };
+    let entry_point: extern "efiapi" fn(*mut u8, usize) = unsafe { core::mem::transmute(entry_addr) };
 
     let gop = unsafe {
         &mut *(bt.locate_protocol::<GraphicsOutput>()
@@ -62,7 +62,7 @@ fn efi_main(image_handle: uefi::Handle,
     system_table.exit_boot_services(image_handle, &mut mmap_buf)
         .expect_success("Failed to exit boot services");
 
-    entry_point(frame_buffer_ptr as u64, frame_buffer_size);
+    entry_point(frame_buffer_ptr, frame_buffer_size);
 
     loop {}
 }
