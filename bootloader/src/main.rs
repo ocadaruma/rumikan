@@ -2,17 +2,16 @@
 #![no_main]
 #![feature(abi_efiapi)]
 
-extern crate uefi;
-extern crate uefi_services;
-
-use uefi::prelude::*;
-use core::fmt::Write;
-use uefi::proto::media::fs::SimpleFileSystem;
-use uefi::proto::media::file::{File, FileMode, FileType, FileAttribute, RegularFile, FileInfo};
-use uefi::table::boot::{MemoryType, AllocateType};
 use core::cell::UnsafeCell;
-use uefi::proto::loaded_image::{LoadedImage, DevicePath};
+use core::fmt::Write;
+
+use log::info;
+use uefi::prelude::*;
 use uefi::proto::console::gop::{GraphicsOutput, PixelFormat};
+use uefi::proto::loaded_image::{DevicePath, LoadedImage};
+use uefi::proto::media::file::{File, FileAttribute, FileInfo, FileMode, FileType, RegularFile};
+use uefi::proto::media::fs::SimpleFileSystem;
+use uefi::table::boot::{AllocateType, MemoryType};
 
 const MEMORY_MAP_FILE: &str = "\\memmap.csv";
 const PAGE_SIZE: usize = 0x1000;
@@ -28,8 +27,7 @@ fn efi_main(image_handle: uefi::Handle,
     system_table.stdout().reset(false)
         .expect_success("Failed to reset text output");
 
-    system_table.stdout().write_str("RuMikan bootloader started.\n")
-        .unwrap();
+    info!("RuMikan bootloader started.");
 
     let bt = system_table.boot_services();
     let fs = get_image_fs(bt, image_handle)
@@ -40,37 +38,31 @@ fn efi_main(image_handle: uefi::Handle,
 
     let entry_addr = load_kernel_file(bt, fs);
 
-    system_table.stdout().write_fmt(
-        format_args!("kernel entry_addr: 0x{:x}\n", entry_addr))
-        .unwrap();
+    info!("kernel entry_addr: 0x{:x}", entry_addr);
 
-    let entry_point: unsafe extern "efiapi" fn(u64, usize) = unsafe { core::mem::transmute(entry_addr) };
+    let entry_point: extern "efiapi" fn(u64, usize) = unsafe { core::mem::transmute(entry_addr) };
 
     let gop = unsafe {
         &mut *(bt.locate_protocol::<GraphicsOutput>()
             .expect_success("Failed to retrieve graphics output")
             .get())
     };
-    system_table.stdout().write_fmt(
-        format_args!("Resolution: {}x{}, Pixel Format: {}, {} pixels/line\n",
-                     gop.current_mode_info().resolution().0,
-                     gop.current_mode_info().resolution().1,
-                     format_pixel_format(gop.current_mode_info().pixel_format()),
-                     gop.current_mode_info().stride()))
-        .unwrap();
     let frame_buffer_ptr = gop.frame_buffer().as_mut_ptr();
     let frame_buffer_size = gop.frame_buffer().size();
 
-    system_table.stdout().write_fmt(
-        format_args!("Frame buffer addr: {:p}, size: 0x{:x}\n",
-                     frame_buffer_ptr, frame_buffer_size))
-        .unwrap();
+    info!("Resolution: {}x{}, Pixel Format: {}, {} pixels/line",
+          gop.current_mode_info().resolution().0,
+          gop.current_mode_info().resolution().1,
+          format_pixel_format(gop.current_mode_info().pixel_format()),
+          gop.current_mode_info().stride());
+
+    info!("Frame buffer addr: {:p}, size: 0x{:x}", frame_buffer_ptr, frame_buffer_size);
 
     let mut mmap_buf = [0u8;4096 * 4];
     system_table.exit_boot_services(image_handle, &mut mmap_buf)
         .expect_success("Failed to exit boot services");
 
-    unsafe { entry_point(frame_buffer_ptr as u64, frame_buffer_size); }
+    entry_point(frame_buffer_ptr as u64, frame_buffer_size);
 
     loop {}
 }
