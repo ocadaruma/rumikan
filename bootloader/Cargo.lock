@@ -58,9 +58,14 @@ name = "rumikan-bootloader"
 version = "0.1.0"
 dependencies = [
  "log",
+ "rumikan-shared",
  "uefi",
  "uefi-services",
 ]
+
+[[package]]
+name = "rumikan-shared"
+version = "0.1.0"
 
 [[package]]
 name = "syn"

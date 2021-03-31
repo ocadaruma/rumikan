@@ -1,15 +1,17 @@
 #![no_std]
 #![no_main]
 #![feature(asm)]
-#![feature(abi_efiapi)]
 
 use core::panic::PanicInfo;
+use rumikan_shared::graphics::{FrameBuffer, PixelColor};
 
 #[no_mangle]
-// need "efiapi" to adjust calling convetion so that callable from UEFI bootloader
-pub extern "efiapi" fn _start(frame_buffer_ptr: *mut u8, frame_buffer_size: usize) -> ! {
-    for i in 0..frame_buffer_size {
-        unsafe { frame_buffer_ptr.offset(i as isize).write(255) };
+pub extern "C" fn _start(mut frame_buffer: FrameBuffer) -> ! {
+    let (w, h) = frame_buffer.resolution();
+    for x in 0..w {
+        for y in 0..h {
+            frame_buffer.write_pixel(x, y, PixelColor::new(0xff, 0xff, 0xff));
+        }
     }
     loop {
         unsafe { asm!("hlt"); }

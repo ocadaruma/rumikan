@@ -40,7 +40,9 @@ fn efi_main(image_handle: uefi::Handle,
 
     info!("kernel entry_addr: 0x{:x}", entry_addr);
 
-    let entry_point: extern "efiapi" fn(*mut u8, usize) = unsafe { core::mem::transmute(entry_addr) };
+    let entry_point: extern "sysv64" fn(rumikan_shared::graphics::FrameBuffer) = unsafe {
+        core::mem::transmute(entry_addr)
+    };
 
     let gop = unsafe {
         &mut *(bt.locate_protocol::<GraphicsOutput>()
@@ -50,11 +52,23 @@ fn efi_main(image_handle: uefi::Handle,
     let frame_buffer_ptr = gop.frame_buffer().as_mut_ptr();
     let frame_buffer_size = gop.frame_buffer().size();
 
-    info!("Resolution: {}x{}, Pixel Format: {}, {} pixels/line",
-          gop.current_mode_info().resolution().0,
-          gop.current_mode_info().resolution().1,
-          format_pixel_format(gop.current_mode_info().pixel_format()),
-          gop.current_mode_info().stride());
+    let frame_buffer = rumikan_shared::graphics::FrameBuffer::new(
+        frame_buffer_ptr,
+        gop.current_mode_info().resolution().0,
+        gop.current_mode_info().resolution().1,
+        gop.current_mode_info().stride(),
+        (match gop.current_mode_info().pixel_format() {
+            PixelFormat::Rgb => Some(rumikan_shared::graphics::PixelFormat::Rgb),
+            PixelFormat::Bgr => Some(rumikan_shared::graphics::PixelFormat::Bgr),
+            _ => None,
+        }).expect("Unsupported pixel format")
+    );
+
+    info!("Resolution: {}x{}, Pixel Format: {:?}, {} pixels/line",
+          frame_buffer.resolution().0,
+          frame_buffer.resolution().1,
+          frame_buffer.pixel_format(),
+          frame_buffer.stride());
 
     info!("Frame buffer addr: {:p}, size: 0x{:x}", frame_buffer_ptr, frame_buffer_size);
 
@@ -62,39 +76,9 @@ fn efi_main(image_handle: uefi::Handle,
     system_table.exit_boot_services(image_handle, &mut mmap_buf)
         .expect_success("Failed to exit boot services");
 
-    entry_point(frame_buffer_ptr, frame_buffer_size);
+    entry_point(frame_buffer);
 
     loop {}
-}
-
-fn format_pixel_format(f: PixelFormat) -> &'static str {
-    match f {
-        PixelFormat::Rgb => "rgb",
-        PixelFormat::Bgr => "bgr",
-        PixelFormat::Bitmask => "bit_mask",
-        PixelFormat::BltOnly => "bit_only",
-    }
-}
-
-fn format_memory_type(ty: MemoryType) -> &'static str {
-    match ty {
-        MemoryType::RESERVED => "reserved",
-        MemoryType::LOADER_CODE => "loader_code",
-        MemoryType::LOADER_DATA => "loader_data",
-        MemoryType::BOOT_SERVICES_CODE => "boot_services_code",
-        MemoryType::BOOT_SERVICES_DATA => "boot_services_data",
-        MemoryType::RUNTIME_SERVICES_CODE => "runtime_services_code",
-        MemoryType::RUNTIME_SERVICES_DATA => "runtime_services_data",
-        MemoryType::CONVENTIONAL => "conventional",
-        MemoryType::UNUSABLE => "unusable",
-        MemoryType::ACPI_RECLAIM => "acpi_reclaim",
-        MemoryType::ACPI_NON_VOLATILE => "acpi_non_volatile",
-        MemoryType::MMIO => "mmio",
-        MemoryType::MMIO_PORT_SPACE => "mmio_port_space",
-        MemoryType::PAL_CODE => "pal_code",
-        MemoryType::PERSISTENT_MEMORY => "persistent_memory",
-        _ => "unknown",
-    }
 }
 
 /// Dump memory map as a file in CSV format.
@@ -110,8 +94,8 @@ fn dump_memory_map(bt: &BootServices, fs: &mut SimpleFileSystem) {
         .unwrap();
     for (i, desc) in desc_iter.enumerate() {
         writer.write_fmt(
-            format_args!("{},{},{},{},{}\n",
-                         i, format_memory_type(desc.ty), desc.phys_start, desc.page_count, desc.att.bits()))
+            format_args!("{},{:?},{},{},{}\n",
+                         i, desc.ty, desc.phys_start, desc.page_count, desc.att.bits()))
             .unwrap();
     }
 }

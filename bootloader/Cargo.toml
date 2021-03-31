@@ -8,3 +8,4 @@ edition = "2018"
 uefi = "0.8.0"
 uefi-services = "0.5.0"
 log = { version = "0.4.14", default-features = false }
+rumikan-shared = { path = "../shared" }
