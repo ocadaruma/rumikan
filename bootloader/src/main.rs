@@ -4,19 +4,35 @@
 
 use core::cell::UnsafeCell;
 use core::fmt::Write;
+use core::mem::{size_of, transmute};
+use core::slice::{from_raw_parts_mut, from_raw_parts};
 
 use log::info;
+use uefi::Char16;
 use uefi::prelude::*;
 use uefi::proto::console::gop::{GraphicsOutput, PixelFormat};
 use uefi::proto::loaded_image::{DevicePath, LoadedImage};
 use uefi::proto::media::file::{File, FileAttribute, FileInfo, FileMode, FileType, RegularFile};
 use uefi::proto::media::fs::SimpleFileSystem;
 use uefi::table::boot::{AllocateType, MemoryType};
+use uefi::table::runtime::Time;
+
+use crate::elf64::SegmentType;
+
+mod elf64;
 
 const MEMORY_MAP_FILE: &str = "\\memmap.csv";
-const PAGE_SIZE: usize = 0x1000;
-const KERNEL_BASE_ADDRESS: usize = 0x100000;
 const KERNEL_FILE: &str = "\\rumikan-kernel";
+// 4KB
+const PAGE_SIZE: usize = 0x1000;
+// Calculate required buffer size which aligned to the struct size
+const FILE_INFO_BUFFER_LEN: usize = {
+    let mut align = size_of::<FileInfoHeader>();
+    // 15 = "rumikan-kernel".len() + 1 (null character)
+    let required = align + 15 * size_of::<Char16>();
+    while align < required { align *= 2; }
+    align
+};
 
 #[entry]
 fn efi_main(image_handle: uefi::Handle,
@@ -40,8 +56,8 @@ fn efi_main(image_handle: uefi::Handle,
 
     info!("kernel entry_addr: 0x{:x}", entry_addr);
 
-    let entry_point: extern "sysv64" fn(rumikan_shared::graphics::FrameBuffer) = unsafe {
-        core::mem::transmute(entry_addr)
+    let entry_point: extern "sysv64" fn(rumikan_shared::graphics::FrameBuffer) -> ! = unsafe {
+        transmute(entry_addr)
     };
 
     let gop = unsafe {
@@ -77,8 +93,6 @@ fn efi_main(image_handle: uefi::Handle,
         .expect_success("Failed to exit boot services");
 
     entry_point(frame_buffer);
-
-    loop {}
 }
 
 /// Dump memory map as a file in CSV format.
@@ -105,21 +119,51 @@ fn dump_memory_map(bt: &BootServices, fs: &mut SimpleFileSystem) {
 fn load_kernel_file(bt: &BootServices, fs: &mut SimpleFileSystem) -> u64 {
     let mut file = open_regular_file(fs, KERNEL_FILE, FileMode::Read);
 
-    let mut buf = [0u8;1024];
+    let mut buf = [0u8; FILE_INFO_BUFFER_LEN];
     let info = file.get_info::<FileInfo>(&mut buf)
         .expect_success("Failed to get file info");
 
-    let addr = bt
-        .allocate_pages(AllocateType::Address(KERNEL_BASE_ADDRESS),
-                        MemoryType::LOADER_DATA,
-                        (info.file_size() as usize + 0xfff) / PAGE_SIZE)
+    let pool = bt.allocate_pool(MemoryType::LOADER_DATA, info.file_size() as usize)
+        .expect_success("Failed to allocate pool for load kernel file temporary");
+    unsafe {
+        file.read(from_raw_parts_mut(pool, info.file_size() as usize))
+            .expect_success("Failed to read kernel file");
+    }
+    let file_header: *const elf64::FileHeader = unsafe { transmute(pool) };
+    let file_header = unsafe { &*file_header };
+
+    let promgram_header: *const elf64::ProgramHeader = unsafe {
+        transmute(pool.offset(file_header.e_phoff as isize))
+    };
+    let program_headers = unsafe {
+        from_raw_parts(promgram_header, file_header.e_phnum as usize)
+    };
+    let (first_addr, last_addr) = program_headers.iter()
+        .filter(|h| h.p_type == SegmentType::Load)
+        .fold((u64::MAX, 0), |acc, header| {
+            (u64::min(acc.0, header.p_vaddr), (u64::max(acc.1, header.p_vaddr + header.p_memsz)))
+        });
+
+    let addr = bt.allocate_pages(
+        AllocateType::Address(first_addr as usize),
+        MemoryType::LOADER_DATA,
+        ((last_addr - first_addr + 0xfff) as usize) / PAGE_SIZE)
         .expect_success("Failed to allocate pages");
 
-    let buf = unsafe {
-        core::slice::from_raw_parts_mut(addr as *mut u8, info.file_size() as usize)
-    };
-    file.read(buf)
-        .expect_success("Failed to read kernel file");
+    program_headers.iter()
+        .filter(|h| h.p_type == SegmentType::Load).for_each(|header| {
+        unsafe {
+            let dest: *mut u8 = transmute(header.p_vaddr);
+            let src = pool.offset(header.p_offset as isize);
+            dest.copy_from(src, header.p_filesz as usize);
+
+            for i in 0..(header.p_memsz - header.p_filesz) {
+                dest.offset((header.p_filesz + i) as isize).write(0);
+            }
+        }
+    });
+    bt.free_pool(pool)
+        .expect_success("Failed to free pool");
 
     // in ELF, the entry-point address is stored at offset 24
     unsafe { *((addr + 24) as *const u64) }
@@ -169,4 +213,19 @@ impl Write for FileWriter {
         self.0.write(s.as_bytes()).expect_success("Failed to write to regular file");
         core::fmt::Result::Ok(())
     }
+}
+
+/// Header for generic file information
+/// This struct is originally defined in uefi-rs crate, but it's not exposed.
+/// Redefined here to retrieve the size of this struct to allocate buffer for FileInfo.
+#[derive(Debug)]
+#[repr(C)]
+struct FileInfoHeader {
+    size: u64,
+    file_size: u64,
+    physical_size: u64,
+    create_time: Time,
+    last_access_time: Time,
+    modification_time: Time,
+    attribute: FileAttribute,
 }
