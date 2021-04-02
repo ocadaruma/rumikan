@@ -129,12 +129,12 @@ fn load_kernel_file(bt: &BootServices, fs: &mut SimpleFileSystem) -> u64 {
         file.read(from_raw_parts_mut(pool, info.file_size() as usize))
             .expect_success("Failed to read kernel file");
     }
-    let file_header: *const elf64::FileHeader = unsafe { transmute(pool) };
+    let file_header = pool as *const elf64::FileHeader;
     let file_header = unsafe { &*file_header };
 
-    let promgram_header: *const elf64::ProgramHeader = unsafe {
-        transmute(pool.offset(file_header.e_phoff as isize))
-    };
+    let promgram_header = unsafe {
+        pool.offset(file_header.e_phoff as isize)
+    } as *const elf64::ProgramHeader;
     let program_headers = unsafe {
         from_raw_parts(promgram_header, file_header.e_phnum as usize)
     };
