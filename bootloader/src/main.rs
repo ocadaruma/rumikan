@@ -60,33 +60,7 @@ fn efi_main(image_handle: uefi::Handle,
         transmute(entry_addr)
     };
 
-    let gop = unsafe {
-        &mut *(bt.locate_protocol::<GraphicsOutput>()
-            .expect_success("Failed to retrieve graphics output")
-            .get())
-    };
-    let frame_buffer_ptr = gop.frame_buffer().as_mut_ptr();
-    let frame_buffer_size = gop.frame_buffer().size();
-
-    let frame_buffer = rumikan_shared::graphics::FrameBuffer::new(
-        frame_buffer_ptr,
-        gop.current_mode_info().resolution().0,
-        gop.current_mode_info().resolution().1,
-        gop.current_mode_info().stride(),
-        (match gop.current_mode_info().pixel_format() {
-            PixelFormat::Rgb => Some(rumikan_shared::graphics::PixelFormat::Rgb),
-            PixelFormat::Bgr => Some(rumikan_shared::graphics::PixelFormat::Bgr),
-            _ => None,
-        }).expect("Unsupported pixel format")
-    );
-
-    info!("Resolution: {}x{}, Pixel Format: {:?}, {} pixels/line",
-          frame_buffer.resolution().0,
-          frame_buffer.resolution().1,
-          frame_buffer.pixel_format(),
-          frame_buffer.stride());
-
-    info!("Frame buffer addr: {:p}, size: 0x{:x}", frame_buffer_ptr, frame_buffer_size);
+    let frame_buffer = get_frame_buffer(bt);
 
     let mut mmap_buf = [0u8;4096 * 4];
     system_table.exit_boot_services(image_handle, &mut mmap_buf)
@@ -118,7 +92,6 @@ fn dump_memory_map(bt: &BootServices, fs: &mut SimpleFileSystem) {
 /// Returns the entry-point address of the kernel.
 fn load_kernel_file(bt: &BootServices, fs: &mut SimpleFileSystem) -> u64 {
     let mut file = open_regular_file(fs, KERNEL_FILE, FileMode::Read);
-
     let mut buf = [0u8; FILE_INFO_BUFFER_LEN];
     let info = file.get_info::<FileInfo>(&mut buf)
         .expect_success("Failed to get file info");
@@ -132,11 +105,11 @@ fn load_kernel_file(bt: &BootServices, fs: &mut SimpleFileSystem) -> u64 {
     let file_header = pool as *const elf64::FileHeader;
     let file_header = unsafe { &*file_header };
 
-    let promgram_header = unsafe {
+    let program_header = unsafe {
         pool.offset(file_header.e_phoff as isize)
     } as *const elf64::ProgramHeader;
     let program_headers = unsafe {
-        from_raw_parts(promgram_header, file_header.e_phnum as usize)
+        from_raw_parts(program_header, file_header.e_phnum as usize)
     };
     let (first_addr, last_addr) = program_headers.iter()
         .filter(|h| h.p_type == SegmentType::Load)
@@ -167,6 +140,39 @@ fn load_kernel_file(bt: &BootServices, fs: &mut SimpleFileSystem) -> u64 {
 
     // in ELF, the entry-point address is stored at offset 24
     unsafe { *((addr + 24) as *const u64) }
+}
+
+/// Get frame buffer struct which will be passed to kernel entry point
+fn get_frame_buffer(bt: &BootServices) -> rumikan_shared::graphics::FrameBuffer {
+    let gop = unsafe {
+        &mut *(bt.locate_protocol::<GraphicsOutput>()
+            .expect_success("Failed to retrieve graphics output")
+            .get())
+    };
+    let frame_buffer_ptr = gop.frame_buffer().as_mut_ptr();
+    let frame_buffer_size = gop.frame_buffer().size();
+
+    let frame_buffer = rumikan_shared::graphics::FrameBuffer::new(
+        frame_buffer_ptr,
+        gop.current_mode_info().resolution().0,
+        gop.current_mode_info().resolution().1,
+        gop.current_mode_info().stride(),
+        (match gop.current_mode_info().pixel_format() {
+            PixelFormat::Rgb => Some(rumikan_shared::graphics::PixelFormat::Rgb),
+            PixelFormat::Bgr => Some(rumikan_shared::graphics::PixelFormat::Bgr),
+            _ => None,
+        }).expect("Unsupported pixel format")
+    );
+
+    info!("Resolution: {}x{}, Pixel Format: {:?}, {} pixels/line",
+          frame_buffer.resolution().0,
+          frame_buffer.resolution().1,
+          frame_buffer.pixel_format(),
+          frame_buffer.stride());
+
+    info!("Frame buffer addr: {:p}, size: 0x{:x}", frame_buffer_ptr, frame_buffer_size);
+
+    frame_buffer
 }
 
 /// Open specified file as RegularFile
