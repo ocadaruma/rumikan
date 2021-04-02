@@ -27,11 +27,10 @@ const KERNEL_FILE: &str = "\\rumikan-kernel";
 const PAGE_SIZE: usize = 0x1000;
 // Calculate required buffer size which aligned to the struct size
 const FILE_INFO_BUFFER_LEN: usize = {
-    let mut align = size_of::<FileInfoHeader>();
+    let align = size_of::<FileInfoHeader>();
     // 15 = "rumikan-kernel".len() + 1 (null character)
     let required = align + 15 * size_of::<Char16>();
-    while align < required { align *= 2; }
-    align
+    align * ((required + (align - 1)) / align)
 };
 
 #[entry]
