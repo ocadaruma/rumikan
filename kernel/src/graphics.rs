@@ -1,24 +1,31 @@
 use rumikan_shared::graphics::{FrameBufferInfo, PixelFormat};
 
 pub mod fonts {
-    pub const A: [u8;16] = [
-        0b00000000,
-        0b00011000,
-        0b00011000,
-        0b00011000,
-        0b00011000,
-        0b00100100,
-        0b00100100,
-        0b00100100,
-        0b00100100,
-        0b01111110,
-        0b01000010,
-        0b01000010,
-        0b01000010,
-        0b11100111,
-        0b00000000,
-        0b00000000,
-    ];
+    use core::slice::from_raw_parts;
+
+    extern "C" {
+        static _binary_shinonome_halfwidth_bin_start: u8;
+        static _binary_shinonome_halfwidth_bin_size: u8;
+    }
+
+    pub struct Font(*const u8);
+
+    impl Font {
+        pub fn bytes(&self) -> &[u8] {
+            unsafe { from_raw_parts(self.0, 16) }
+        }
+    }
+
+    pub fn get_font(c: char) -> Option<Font> {
+        let size = (unsafe { &_binary_shinonome_halfwidth_bin_size } as *const u8) as u32;
+        if let Some(index) = (c as u32).checked_mul(16) {
+            if index < size {
+                let start_ptr = unsafe { &_binary_shinonome_halfwidth_bin_start } as *const u8;
+                return Some(Font(unsafe { start_ptr.offset(index as isize) }));
+            }
+        }
+        None
+    }
 }
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
@@ -77,11 +84,8 @@ impl FrameBuffer {
     }
 
     pub fn write_ascii(&mut self, x: usize, y: usize, c: char, color: PixelColor) {
-        if let Some(font) = match c {
-            'A' => Some(fonts::A),
-            _ => None,
-        } {
-            for (dy, row) in font.iter().enumerate() {
+        if let Some(font) = fonts::get_font(c) {
+            for (dy, row) in font.bytes().iter().enumerate() {
                 for dx in 0..8 {
                     if (row << dx) & 0x80 != 0 {
                         self.write_pixel(x + dx, y + dy, color);

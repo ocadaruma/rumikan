@@ -20,8 +20,11 @@ pub extern "C" fn _start(frame_buffer_info: FrameBufferInfo) -> ! {
             frame_buffer.write_pixel(x, y, PixelColor::new(0xbb, 0xbb, 0xbb));
         }
     }
-    frame_buffer.write_ascii(50, 50, 'A', PixelColor::new(0x0, 0x0, 0x0));
-    frame_buffer.write_ascii(58, 50, 'A', PixelColor::new(0x0, 0x0, 0x0));
+    for (i, n) in (33u32..=126).enumerate() {
+        if let Some(c) = char::from_u32(n) {
+            frame_buffer.write_ascii(50 + 8 * i, 50, c, PixelColor::new(0x0, 0x0, 0x0));
+        }
+    }
 
     loop {
         unsafe { asm!("hlt"); }

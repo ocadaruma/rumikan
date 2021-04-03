@@ -1,9 +1,11 @@
 [build]
 target = "x86_64-bare.json"
 rustflags = [
-    "-C", "link-arg=--image-base=0x100000"
+#    "-Z", "print-link-args",
+    "-C", "link-arg=--image-base=0x100000",
 ]
 
 [unstable]
 build-std = ["core", "compiler_builtins", "alloc"]
 build-std-features = ["compiler-builtins-mem"]
+extra-link-arg = true
