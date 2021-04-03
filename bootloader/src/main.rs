@@ -5,7 +5,7 @@
 use core::cell::UnsafeCell;
 use core::fmt::Write;
 use core::mem::{size_of, transmute};
-use core::slice::{from_raw_parts_mut, from_raw_parts};
+use core::slice::{from_raw_parts, from_raw_parts_mut};
 
 use log::info;
 use uefi::Char16;
@@ -16,6 +16,8 @@ use uefi::proto::media::file::{File, FileAttribute, FileInfo, FileMode, FileType
 use uefi::proto::media::fs::SimpleFileSystem;
 use uefi::table::boot::{AllocateType, MemoryType};
 use uefi::table::runtime::Time;
+
+use rumikan_shared::graphics::FrameBufferInfo;
 
 use crate::elf64::SegmentType;
 
@@ -55,7 +57,7 @@ fn efi_main(image_handle: uefi::Handle,
 
     info!("kernel entry_addr: 0x{:x}", entry_addr);
 
-    let entry_point: extern "sysv64" fn(rumikan_shared::graphics::FrameBuffer) -> ! = unsafe {
+    let entry_point: extern "sysv64" fn(FrameBufferInfo) -> ! = unsafe {
         transmute(entry_addr)
     };
 
@@ -142,7 +144,7 @@ fn load_kernel_file(bt: &BootServices, fs: &mut SimpleFileSystem) -> u64 {
 }
 
 /// Get frame buffer struct which will be passed to kernel entry point
-fn get_frame_buffer(bt: &BootServices) -> rumikan_shared::graphics::FrameBuffer {
+fn get_frame_buffer(bt: &BootServices) -> FrameBufferInfo {
     let gop = unsafe {
         &mut *(bt.locate_protocol::<GraphicsOutput>()
             .expect_success("Failed to retrieve graphics output")
@@ -151,7 +153,7 @@ fn get_frame_buffer(bt: &BootServices) -> rumikan_shared::graphics::FrameBuffer 
     let frame_buffer_ptr = gop.frame_buffer().as_mut_ptr();
     let frame_buffer_size = gop.frame_buffer().size();
 
-    let frame_buffer = rumikan_shared::graphics::FrameBuffer::new(
+    let info = FrameBufferInfo::new(
         frame_buffer_ptr,
         gop.current_mode_info().resolution().0,
         gop.current_mode_info().resolution().1,
@@ -164,14 +166,14 @@ fn get_frame_buffer(bt: &BootServices) -> rumikan_shared::graphics::FrameBuffer 
     );
 
     info!("Resolution: {}x{}, Pixel Format: {:?}, {} pixels/line",
-          frame_buffer.resolution().0,
-          frame_buffer.resolution().1,
-          frame_buffer.pixel_format(),
-          frame_buffer.stride());
+          info.resolution().0,
+          info.resolution().1,
+          info.pixel_format(),
+          info.stride());
 
     info!("Frame buffer addr: {:p}, size: 0x{:x}", frame_buffer_ptr, frame_buffer_size);
 
-    frame_buffer
+    info
 }
 
 /// Open specified file as RegularFile
