@@ -6,7 +6,7 @@ pub enum PixelFormat {
 }
 
 #[repr(C)]
-#[derive(Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct FrameBufferInfo {
     ptr: *mut u8,
     res_h: usize,

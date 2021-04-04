@@ -3,8 +3,8 @@ use core::fmt::{Arguments, Write};
 use crate::graphics::{CharBuffer, FrameBuffer, PixelColor};
 use crate::graphics::fonts::Font;
 
-pub struct Console<'buf> {
-    buffer: &'buf mut FrameBuffer,
+pub struct Console {
+    buffer: FrameBuffer,
     bg_color: PixelColor,
     fg_color: PixelColor,
     history: [[char;Console::COLS];Console::ROWS],
@@ -13,11 +13,11 @@ pub struct Console<'buf> {
     row_head: usize,
 }
 
-impl Console<'_> {
+impl Console {
     const ROWS: usize = 25;
     const COLS: usize = 80;
 
-    pub fn new(buffer: &mut FrameBuffer,
+    pub fn new(buffer: FrameBuffer,
                bg_color: PixelColor,
                fg_color: PixelColor) -> Console {
         let mut console = Console {

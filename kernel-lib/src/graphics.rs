@@ -48,6 +48,7 @@ impl PixelColor {
     }
 }
 
+#[derive(Clone, Copy, Debug)]
 pub struct FrameBuffer(FrameBufferInfo);
 
 impl FrameBuffer {
