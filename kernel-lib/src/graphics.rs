@@ -15,6 +15,9 @@ pub mod fonts {
     pub struct Font(*const u8);
 
     impl Font {
+        pub const WIDTH: usize = 8;
+        pub const HEIGHT: usize = 16;
+
         pub fn bytes(&self) -> &[u8] {
             unsafe { from_raw_parts(self.0, 16) }
         }
@@ -87,7 +90,7 @@ impl FrameBuffer {
         }
     }
 
-    pub fn write_ascii(&mut self, x: usize, y: usize, c: char, color: PixelColor) {
+    pub fn write_char(&mut self, x: usize, y: usize, c: char, color: PixelColor) {
         if let Some(font) = fonts::get_font(c) {
             for (dy, row) in font.bytes().iter().enumerate() {
                 for dx in 0..8 {
@@ -101,7 +104,7 @@ impl FrameBuffer {
 
     pub fn write_str(&mut self, x: usize, y: usize, s: &str, color: PixelColor) {
         for (i, c) in s.chars().enumerate() {
-            self.write_ascii(x + 8 * i, y, c, color);
+            self.write_char(x + fonts::Font::WIDTH * i, y, c, color);
         }
     }
 
@@ -109,8 +112,8 @@ impl FrameBuffer {
         let mut buffer = CharBuffer::new();
         buffer.write_fmt(args)?;
 
-        for (i, c) in buffer.chars().iter().enumerate() {
-            self.write_ascii(x + 8 * i, y, *c, color);
+        for (i, &c) in buffer.chars().iter().enumerate() {
+            self.write_char(x + fonts::Font::WIDTH * i, y, c, color);
         }
         Ok(())
     }
@@ -126,11 +129,11 @@ pub struct CharBuffer {
 pub struct BufferFullError;
 
 impl CharBuffer {
-    fn new() -> CharBuffer {
+    pub fn new() -> CharBuffer {
         CharBuffer { buf: [0 as char;256], len: 0, }
     }
 
-    fn add(&mut self, c: char) -> Result<(), BufferFullError> {
+    pub fn add(&mut self, c: char) -> Result<(), BufferFullError> {
         if self.len < self.buf.len() {
             self.buf[self.len] = c;
             self.len += 1;
@@ -140,7 +143,7 @@ impl CharBuffer {
         }
     }
 
-    fn chars(&self) -> &[char] {
+    pub fn chars(&self) -> &[char] {
         &self.buf[..self.len]
     }
 }
@@ -156,9 +159,16 @@ impl fmt::Write for CharBuffer {
     }
 }
 
+impl Default for CharBuffer {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::graphics::CharBuffer;
+    use core::fmt::Write;
 
     #[test]
     fn char_buffer_add() {
@@ -175,5 +185,16 @@ mod tests {
         }
         assert!(buf.add('A').is_ok());
         assert!(buf.add('A').is_err());
+    }
+
+    #[test]
+    fn char_buffer_write_partial() {
+        let mut buf = CharBuffer::new();
+        for _ in 0..255 {
+            buf.add('A').unwrap();
+        }
+        assert!(buf.write_str("BCCCCCCC").is_err());
+        // must be written partially even if failed to write entire string
+        assert_eq!(buf.chars()[255], 'B');
     }
 }
