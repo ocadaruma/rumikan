@@ -1,3 +1,6 @@
+use core::fmt;
+use core::fmt::{Arguments, Write};
+
 use rumikan_shared::graphics::{FrameBufferInfo, PixelFormat};
 
 pub mod fonts {
@@ -99,5 +102,53 @@ impl FrameBuffer {
         for (i, c) in s.chars().enumerate() {
             self.write_ascii(x + 8 * i, y, c, color);
         }
+    }
+
+    pub fn write_fmt(&mut self, x: usize, y: usize, args: Arguments, color: PixelColor) -> fmt::Result {
+        let mut buffer = CharBuffer::new();
+        buffer.write_fmt(args)?;
+
+        for (i, c) in buffer.chars().iter().enumerate() {
+            self.write_ascii(x + 8 * i, y, *c, color);
+        }
+        Ok(())
+    }
+}
+
+struct CharBuffer {
+    buf: [char;256],
+    len: usize,
+}
+
+struct BufferFullError;
+
+impl CharBuffer {
+    fn new() -> CharBuffer {
+        CharBuffer { buf: [0 as char;256], len: 0, }
+    }
+
+    fn add(&mut self, c: char) -> Result<(), BufferFullError> {
+        if self.len < self.buf.len() {
+            self.buf[self.len] = c;
+            self.len += 1;
+            Ok(())
+        } else {
+            Err(BufferFullError)
+        }
+    }
+
+    fn chars(&self) -> &[char] {
+        &self.buf[..self.len]
+    }
+}
+
+impl fmt::Write for CharBuffer {
+    fn write_str(&mut self, s: &str) -> fmt::Result {
+        for c in s.chars() {
+            if self.add(c).is_err() {
+                return fmt::Result::Err(fmt::Error);
+            }
+        }
+        fmt::Result::Ok(())
     }
 }
