@@ -26,6 +26,8 @@ jobs:
           components: rust-src
       - name: Build
         run: ./cargo-all.sh build
+      - name: Test
+        run: ./cargo-all.sh test
   lint:
     runs-on: ubuntu-latest
     steps:
