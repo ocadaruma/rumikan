@@ -4,11 +4,8 @@
 
 use core::panic::PanicInfo;
 
+use rumikan_kernel_lib::graphics::{FrameBuffer, PixelColor};
 use rumikan_shared::graphics::FrameBufferInfo;
-
-use crate::graphics::{FrameBuffer, PixelColor};
-
-mod graphics;
 
 #[no_mangle]
 pub extern "C" fn _start(frame_buffer_info: FrameBufferInfo) -> ! {

@@ -1,0 +1,3 @@
+= rumikan-shared
+
+A library crate which will be shared between UEFI bootloader (`rumikan-bootloader`) and the kernel (`rumikan-kernel`).

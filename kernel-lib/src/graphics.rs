@@ -6,6 +6,7 @@ use rumikan_shared::graphics::{FrameBufferInfo, PixelFormat};
 pub mod fonts {
     use core::slice::from_raw_parts;
 
+    // Font binary should be embedded in kernel ELF
     extern "C" {
         static _binary_shinonome_halfwidth_bin_start: u8;
         static _binary_shinonome_halfwidth_bin_size: u8;
@@ -115,12 +116,14 @@ impl FrameBuffer {
     }
 }
 
-struct CharBuffer {
+/// Simple char buffer backed by fixed sized array.
+pub struct CharBuffer {
     buf: [char;256],
     len: usize,
 }
 
-struct BufferFullError;
+#[derive(Debug)]
+pub struct BufferFullError;
 
 impl CharBuffer {
     fn new() -> CharBuffer {
@@ -150,5 +153,27 @@ impl fmt::Write for CharBuffer {
             }
         }
         fmt::Result::Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::graphics::CharBuffer;
+
+    #[test]
+    fn char_buffer_add() {
+        let mut buf = CharBuffer::new();
+        buf.add('A').unwrap();
+        assert_eq!(buf.chars(), &['A']);
+    }
+
+    #[test]
+    fn char_buffer_full() {
+        let mut buf = CharBuffer::new();
+        for _ in 0..255 {
+            buf.add('A').unwrap();
+        }
+        assert!(buf.add('A').is_ok());
+        assert!(buf.add('A').is_err());
     }
 }
