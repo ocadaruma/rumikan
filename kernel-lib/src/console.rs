@@ -1,5 +1,6 @@
-use crate::graphics::{FrameBuffer, PixelColor, CharBuffer};
 use core::fmt::{Arguments, Write};
+
+use crate::graphics::{CharBuffer, FrameBuffer, PixelColor};
 use crate::graphics::fonts::Font;
 
 pub struct Console<'buf> {

@@ -167,8 +167,9 @@ impl Default for CharBuffer {
 
 #[cfg(test)]
 mod tests {
-    use crate::graphics::CharBuffer;
     use core::fmt::Write;
+
+    use crate::graphics::CharBuffer;
 
     #[test]
     fn char_buffer_add() {

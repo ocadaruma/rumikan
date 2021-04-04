@@ -4,9 +4,9 @@
 
 use core::panic::PanicInfo;
 
+use rumikan_kernel_lib::console::Console;
 use rumikan_kernel_lib::graphics::{FrameBuffer, PixelColor};
 use rumikan_shared::graphics::FrameBufferInfo;
-use rumikan_kernel_lib::console::Console;
 
 #[no_mangle]
 pub extern "C" fn _start(frame_buffer_info: FrameBufferInfo) -> ! {
