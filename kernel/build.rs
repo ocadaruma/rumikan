@@ -1,6 +1,6 @@
 use std::env;
-use std::process::Command;
 use std::path::Path;
+use std::process::Command;
 
 fn main() {
     let out_dir = env::var("OUT_DIR").unwrap();
@@ -18,5 +18,8 @@ fn main() {
         .status()
         .unwrap();
 
-    println!("cargo:rustc-link-arg={}", font_obj.as_path().to_str().unwrap())
+    println!(
+        "cargo:rustc-link-arg={}",
+        font_obj.as_path().to_str().unwrap()
+    )
 }

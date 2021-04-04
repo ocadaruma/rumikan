@@ -44,7 +44,7 @@ pub struct PixelColor {
 
 impl PixelColor {
     pub fn new(r: u8, g: u8, b: u8) -> PixelColor {
-        PixelColor { r, g, b, }
+        PixelColor { r, g, b }
     }
 }
 
@@ -81,12 +81,12 @@ impl FrameBuffer {
                     pixel_ptr.offset(0).write(color.r);
                     pixel_ptr.offset(1).write(color.g);
                     pixel_ptr.offset(2).write(color.b);
-                },
+                }
                 PixelFormat::Bgr => {
                     pixel_ptr.offset(0).write(color.b);
                     pixel_ptr.offset(1).write(color.g);
                     pixel_ptr.offset(2).write(color.r);
-                },
+                }
             };
         }
     }
@@ -109,7 +109,13 @@ impl FrameBuffer {
         }
     }
 
-    pub fn write_fmt(&mut self, x: usize, y: usize, args: Arguments, color: PixelColor) -> fmt::Result {
+    pub fn write_fmt(
+        &mut self,
+        x: usize,
+        y: usize,
+        args: Arguments,
+        color: PixelColor,
+    ) -> fmt::Result {
         let mut buffer = CharBuffer::new();
         buffer.write_fmt(args)?;
 
@@ -122,7 +128,7 @@ impl FrameBuffer {
 
 /// Simple char buffer backed by fixed sized array.
 pub struct CharBuffer {
-    buf: [char;256],
+    buf: [char; 256],
     len: usize,
 }
 
@@ -131,7 +137,10 @@ pub struct BufferFullError;
 
 impl CharBuffer {
     pub fn new() -> CharBuffer {
-        CharBuffer { buf: [0 as char;256], len: 0, }
+        CharBuffer {
+            buf: [0 as char; 256],
+            len: 0,
+        }
     }
 
     pub fn add(&mut self, c: char) -> Result<(), BufferFullError> {

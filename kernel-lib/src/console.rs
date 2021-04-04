@@ -1,13 +1,13 @@
 use core::fmt::{Arguments, Write};
 
-use crate::graphics::{CharBuffer, FrameBuffer, PixelColor};
 use crate::graphics::fonts::Font;
+use crate::graphics::{CharBuffer, FrameBuffer, PixelColor};
 
 pub struct Console {
     buffer: FrameBuffer,
     bg_color: PixelColor,
     fg_color: PixelColor,
-    history: [[char;Console::COLS];Console::ROWS],
+    history: [[char; Console::COLS]; Console::ROWS],
     cursor_row: usize,
     cursor_col: usize,
     row_head: usize,
@@ -17,14 +17,12 @@ impl Console {
     const ROWS: usize = 25;
     const COLS: usize = 80;
 
-    pub fn new(buffer: FrameBuffer,
-               bg_color: PixelColor,
-               fg_color: PixelColor) -> Console {
+    pub fn new(buffer: FrameBuffer, bg_color: PixelColor, fg_color: PixelColor) -> Console {
         let mut console = Console {
             buffer,
             bg_color,
             fg_color,
-            history: [[0 as char;Console::COLS];Console::ROWS],
+            history: [[0 as char; Console::COLS]; Console::ROWS],
             cursor_row: 0,
             cursor_col: 0,
             row_head: 0,
@@ -53,10 +51,17 @@ impl Console {
             self.row_head = (self.row_head + 1) % Console::ROWS;
             self.cursor_row = (self.cursor_row + 1) % Console::ROWS;
 
-            for (console_row, history_row) in (self.row_head..(self.row_head + Console::ROWS - 1)).enumerate() {
+            for (console_row, history_row) in
+                (self.row_head..(self.row_head + Console::ROWS - 1)).enumerate()
+            {
                 let history_row_mod = history_row % Console::ROWS;
                 for (col, &c) in self.history[history_row_mod].iter().enumerate() {
-                    self.buffer.write_char(col * Font::WIDTH, console_row * Font::HEIGHT, c, self.fg_color);
+                    self.buffer.write_char(
+                        col * Font::WIDTH,
+                        console_row * Font::HEIGHT,
+                        c,
+                        self.fg_color,
+                    );
                 }
             }
         } else {
@@ -68,8 +73,17 @@ impl Console {
 
     pub fn print(&mut self, args: Arguments) {
         let mut char_buffer = CharBuffer::new();
-        let truncated_message = if char_buffer.write_fmt(args).is_ok() { "" } else { "...(truncated)" };
-        for c in char_buffer.chars().iter().copied().chain(truncated_message.chars()) {
+        let truncated_message = if char_buffer.write_fmt(args).is_ok() {
+            ""
+        } else {
+            "...(truncated)"
+        };
+        for c in char_buffer
+            .chars()
+            .iter()
+            .copied()
+            .chain(truncated_message.chars())
+        {
             if c == '\n' {
                 self.new_line();
                 continue;
@@ -82,7 +96,8 @@ impl Console {
                 self.cursor_col * Font::WIDTH,
                 self.logical_row() * Font::HEIGHT,
                 c,
-                self.fg_color);
+                self.fg_color,
+            );
             self.cursor_col += 1;
         }
     }

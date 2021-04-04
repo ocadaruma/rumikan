@@ -1,7 +1,7 @@
 #[repr(C)]
 #[derive(Debug, Eq, PartialEq)]
 pub struct FileHeader {
-    pub e_ident: [u8;16],
+    pub e_ident: [u8; 16],
     pub e_type: u16,
     pub e_machine: u16,
     pub e_version: u32,
