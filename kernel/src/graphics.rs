@@ -94,4 +94,10 @@ impl FrameBuffer {
             }
         }
     }
+
+    pub fn write_str(&mut self, x: usize, y: usize, s: &str, color: PixelColor) {
+        for (i, c) in s.chars().enumerate() {
+            self.write_ascii(x + 8 * i, y, c, color);
+        }
+    }
 }
