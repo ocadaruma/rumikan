@@ -35,6 +35,35 @@ pub mod fonts {
     }
 }
 
+pub mod mouse {
+    pub const CURSOR_GLYPH: [u64; 24] = [
+        0x1000000000000000,
+        0x1100000000000000,
+        0x1210000000000000,
+        0x1221000000000000,
+        0x1222100000000000,
+        0x1222210000000000,
+        0x1222221000000000,
+        0x1222222100000000,
+        0x1222222210000000,
+        0x1222222221000000,
+        0x1222222222100000,
+        0x1222222222210000,
+        0x1222222222221000,
+        0x1222222222222100,
+        0x1222222111111110,
+        0x1222222100000000,
+        0x1222211210000000,
+        0x1222101210000000,
+        0x1221000121000000,
+        0x1210000121000000,
+        0x1100000012100000,
+        0x1000000012100000,
+        0x0000000001210000,
+        0x0000000001110000,
+    ];
+}
+
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub struct PixelColor {
     r: u8,
@@ -106,6 +135,25 @@ impl FrameBuffer {
     pub fn write_str(&mut self, x: usize, y: usize, s: &str, color: PixelColor) {
         for (i, c) in s.chars().enumerate() {
             self.write_char(x + fonts::Font::WIDTH * i, y, c, color);
+        }
+    }
+
+    pub fn write_mouse_cursor(
+        &mut self,
+        x: usize,
+        y: usize,
+        edge_color: PixelColor,
+        fill_color: PixelColor,
+    ) {
+        for (dy, &row) in mouse::CURSOR_GLYPH.iter().enumerate() {
+            for dx in 0..16 {
+                match (row >> (4 * (0xf - dx))) & 0xf {
+                    // edge
+                    1 => self.write_pixel(x + dx, y + dy, edge_color),
+                    2 => self.write_pixel(x + dx, y + dy, fill_color),
+                    _ => {}
+                }
+            }
         }
     }
 

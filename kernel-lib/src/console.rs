@@ -3,6 +3,12 @@ use core::fmt::{Arguments, Write};
 use crate::graphics::fonts::Font;
 use crate::graphics::{CharBuffer, FrameBuffer, PixelColor};
 
+static mut CONSOLE: Option<Console> = None;
+
+pub fn init_global_console(console: Console) {
+    unsafe { CONSOLE = Some(console) };
+}
+
 pub struct Console {
     buffer: FrameBuffer,
     bg_color: PixelColor,
@@ -100,5 +106,16 @@ impl Console {
             );
             self.cursor_col += 1;
         }
+    }
+}
+
+#[macro_export]
+macro_rules! printk {
+    ($($arg:tt)*) => ($crate::console::_print(format_args!($($arg)*)));
+}
+
+pub fn _print(args: Arguments) {
+    unsafe {
+        CONSOLE.as_mut().unwrap().print(args);
     }
 }
