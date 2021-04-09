@@ -1,7 +1,7 @@
 use core::fmt::{Arguments, Write};
 
 use crate::graphics::fonts::Font;
-use crate::graphics::{CharBuffer, FrameBuffer, PixelColor};
+use crate::graphics::{CharVec, FrameBuffer, PixelColor};
 
 static mut CONSOLE: Option<Console> = None;
 
@@ -78,14 +78,14 @@ impl Console {
     }
 
     pub fn print(&mut self, args: Arguments) {
-        let mut char_buffer = CharBuffer::new();
-        let truncated_message = if char_buffer.write_fmt(args).is_ok() {
+        let mut v = CharVec::new();
+        let truncated_message = if v.write_fmt(args).is_ok() {
             ""
         } else {
             "...(truncated)"
         };
-        for c in char_buffer
-            .chars()
+        for c in v
+            .as_slice()
             .iter()
             .copied()
             .chain(truncated_message.chars())

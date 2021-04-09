@@ -1,6 +1,7 @@
 use core::fmt;
 use core::fmt::{Arguments, Write};
 
+use crate::util::ArrayVec;
 use rumikan_shared::graphics::{FrameBufferInfo, PixelFormat};
 
 pub mod fonts {
@@ -164,49 +165,19 @@ impl FrameBuffer {
         args: Arguments,
         color: PixelColor,
     ) -> fmt::Result {
-        let mut buffer = CharBuffer::new();
-        buffer.write_fmt(args)?;
+        let mut v = CharVec::new();
+        v.write_fmt(args)?;
 
-        for (i, &c) in buffer.chars().iter().enumerate() {
+        for (i, &c) in v.as_slice().iter().enumerate() {
             self.write_char(x + fonts::Font::WIDTH * i, y, c, color);
         }
         Ok(())
     }
 }
 
-/// Simple char buffer backed by fixed sized array.
-pub struct CharBuffer {
-    buf: [char; 256],
-    len: usize,
-}
+pub type CharVec = ArrayVec<char, 256>;
 
-#[derive(Debug)]
-pub struct BufferFullError;
-
-impl CharBuffer {
-    pub fn new() -> CharBuffer {
-        CharBuffer {
-            buf: [0 as char; 256],
-            len: 0,
-        }
-    }
-
-    pub fn add(&mut self, c: char) -> Result<(), BufferFullError> {
-        if self.len < self.buf.len() {
-            self.buf[self.len] = c;
-            self.len += 1;
-            Ok(())
-        } else {
-            Err(BufferFullError)
-        }
-    }
-
-    pub fn chars(&self) -> &[char] {
-        &self.buf[..self.len]
-    }
-}
-
-impl fmt::Write for CharBuffer {
+impl fmt::Write for CharVec {
     fn write_str(&mut self, s: &str) -> fmt::Result {
         for c in s.chars() {
             if self.add(c).is_err() {
@@ -217,7 +188,7 @@ impl fmt::Write for CharBuffer {
     }
 }
 
-impl Default for CharBuffer {
+impl Default for CharVec {
     fn default() -> Self {
         Self::new()
     }
@@ -227,33 +198,16 @@ impl Default for CharBuffer {
 mod tests {
     use core::fmt::Write;
 
-    use crate::graphics::CharBuffer;
+    use crate::graphics::CharVec;
 
     #[test]
-    fn char_buffer_add() {
-        let mut buf = CharBuffer::new();
-        buf.add('A').unwrap();
-        assert_eq!(buf.chars(), &['A']);
-    }
-
-    #[test]
-    fn char_buffer_full() {
-        let mut buf = CharBuffer::new();
+    fn char_vec_write_partial() {
+        let mut v = CharVec::new();
         for _ in 0..255 {
-            buf.add('A').unwrap();
+            v.add('A').unwrap();
         }
-        assert!(buf.add('A').is_ok());
-        assert!(buf.add('A').is_err());
-    }
-
-    #[test]
-    fn char_buffer_write_partial() {
-        let mut buf = CharBuffer::new();
-        for _ in 0..255 {
-            buf.add('A').unwrap();
-        }
-        assert!(buf.write_str("BCCCCCCC").is_err());
+        assert!(v.write_str("BCCCCCCC").is_err());
         // must be written partially even if failed to write entire string
-        assert_eq!(buf.chars()[255], 'B');
+        assert_eq!(v.as_slice()[255], 'B');
     }
 }
