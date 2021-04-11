@@ -75,6 +75,7 @@ fn ceil(value: usize, alignment: usize) -> usize {
 #[cfg(test)]
 mod tests {
     use crate::usb::mem::{allocate, allocate_array, ceil, current_offset, free_all};
+    use core::slice::from_raw_parts_mut;
 
     #[derive(Copy, Clone, Debug, Eq, PartialEq)]
     struct TestStruct {
@@ -116,8 +117,8 @@ mod tests {
     fn allocate_array_test_struct() {
         free_all();
 
-        let array: *mut [TestStruct] = allocate_array(2, None, None).unwrap();
-        let array = unsafe { &*array };
+        let array: *mut TestStruct = allocate_array(2, None, None).unwrap();
+        let array = unsafe { from_raw_parts_mut(array, 2) };
 
         assert_eq!(array.len(), 2);
         assert_eq!(array[0], TestStruct { a: 0, b: 0 });
