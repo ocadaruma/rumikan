@@ -6,3 +6,4 @@ edition = "2018"
 
 [dependencies]
 rumikan-shared = { path = "../shared" }
+xhci = "0.5.2"

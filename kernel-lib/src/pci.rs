@@ -19,7 +19,10 @@ impl Pci {
 }
 
 #[derive(Debug)]
-pub struct Error();
+pub enum Error {
+    TooManyDevices,
+    IndexOutOfRange,
+}
 
 pub type Result<T> = core::result::Result<T, Error>;
 
@@ -86,7 +89,7 @@ impl Pci {
             })
             .is_err()
         {
-            return Err(Error());
+            return Err(Error::TooManyDevices);
         }
 
         if class_code.base == 0x06 && class_code.sub == 0x04 {
@@ -140,6 +143,55 @@ impl Device {
         );
         (in32(CONFIG_DATA) & 0xffff) as u16
     }
+
+    pub fn read_bar(&self, index: u8) -> Result<usize> {
+        if index >= 6 {
+            return Err(Error::IndexOutOfRange);
+        }
+
+        let addr = 0x10 + (4 * index);
+        out32(
+            CONFIG_ADDRESS,
+            ConfigAddress::new(self.bus, self.device, self.function, addr).value(),
+        );
+        let bar = in32(CONFIG_DATA);
+        if (bar & 4) == 0 {
+            return Ok(bar as usize);
+        }
+        if index >= 5 {
+            return Err(Error::IndexOutOfRange);
+        }
+
+        out32(
+            CONFIG_ADDRESS,
+            ConfigAddress::new(self.bus, self.device, self.function, addr + 4).value(),
+        );
+        let bar_upper = in32(CONFIG_DATA);
+        Ok(((bar_upper as usize) << 32) | (bar as usize))
+    }
+
+    pub fn switch_ehci2xhci_if_necessary(&self, pci: &Pci) {
+        if self.read_vendor_id() == 0x8086
+            && pci.devices().iter().any(|dev| {
+                dev.class_code
+                    == ClassCode {
+                        base: 0x0c,
+                        sub: 0x03,
+                        interface: 0x20,
+                    }
+            })
+        {
+            out32(CONFIG_ADDRESS, 0xdc);
+            let superspeed_ports = in32(CONFIG_DATA);
+            out32(CONFIG_ADDRESS, 0xd8);
+            out32(CONFIG_DATA, superspeed_ports);
+
+            out32(CONFIG_ADDRESS, 0xd4);
+            let ehci2xhci_ports = in32(CONFIG_DATA);
+            out32(CONFIG_ADDRESS, 0xd0);
+            out32(CONFIG_DATA, ehci2xhci_ports);
+        }
+    }
 }
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Default)]
@@ -147,6 +199,12 @@ pub struct ClassCode {
     pub base: u8,
     pub sub: u8,
     pub interface: u8,
+}
+
+impl ClassCode {
+    pub fn value(&self) -> u32 {
+        ((self.base as u32) << 24) | ((self.sub as u32) << 16) | ((self.interface as u32) << 8)
+    }
 }
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
@@ -188,5 +246,27 @@ fn in32(addr: u16) -> u32 {
           out("eax") data, in("dx") addr
         );
         data
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::pci::ClassCode;
+
+    #[test]
+    fn class_code_equality() {
+        let xhc_class_code = ClassCode {
+            base: 0x0c,
+            sub: 0x03,
+            interface: 0x30,
+        };
+        assert_eq!(
+            xhc_class_code,
+            ClassCode {
+                base: 0x0c,
+                sub: 0x03,
+                interface: 0x30
+            }
+        );
     }
 }

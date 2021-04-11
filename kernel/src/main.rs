@@ -6,8 +6,9 @@ use core::panic::PanicInfo;
 
 use rumikan_kernel_lib::console::{init_global_console, Console};
 use rumikan_kernel_lib::graphics::{FrameBuffer, PixelColor};
-use rumikan_kernel_lib::pci::Pci;
+use rumikan_kernel_lib::pci::{ClassCode, Pci};
 use rumikan_kernel_lib::printk;
+use rumikan_kernel_lib::usb::Xhc;
 use rumikan_shared::graphics::FrameBufferInfo;
 
 #[no_mangle]
@@ -32,16 +33,47 @@ pub extern "C" fn _start(frame_buffer_info: FrameBufferInfo) -> ! {
     if pci.scan_all_bus().is_err() {
         printk!("Failed to scan PCI bus\n");
     }
-    for &device in pci.devices() {
-        let vendor_id = device.read_vendor_id();
+
+    for &dev in pci.devices() {
+        let vendor_id = dev.read_vendor_id();
         printk!(
             "{}.{}.{}: vend 0x{:04x}, head 0x{:-2x}\n",
-            device.bus,
-            device.device,
-            device.function,
+            dev.bus,
+            dev.device,
+            dev.function,
             vendor_id,
-            device.header_type
+            dev.header_type
         );
+    }
+
+    let xhc_class_code = ClassCode {
+        base: 0x0c,
+        sub: 0x03,
+        interface: 0x30,
+    };
+    let mut xhc_dev = None;
+    for &dev in pci.devices() {
+        if dev.class_code == xhc_class_code {
+            xhc_dev = Some(dev);
+
+            if dev.read_vendor_id() == 0x8086 {
+                break;
+            }
+        }
+    }
+    if let Some(dev) = xhc_dev {
+        printk!(
+            "xHC has been found: {}.{}.{}\n",
+            dev.bus,
+            dev.device,
+            dev.function
+        );
+        let xhc_mmio_base = dev.read_bar(0).unwrap() & !0xfusize;
+        printk!("xHC mmio_base = 0x{:08x}\n", xhc_mmio_base);
+        dev.switch_ehci2xhci_if_necessary(&pci);
+
+        let mut xhc = Xhc::new(xhc_mmio_base);
+        xhc.initialize();
     }
 
     loop {
