@@ -2,7 +2,7 @@ mod mem;
 mod ring;
 
 use crate::usb::mem::allocate;
-use crate::usb::ring::Ring;
+use crate::usb::ring::{EventRing, Ring};
 use core::num::NonZeroUsize;
 use xhci::accessor::Mapper;
 use xhci::{ExtendedCapability, Registers};
@@ -10,7 +10,7 @@ use xhci::{ExtendedCapability, Registers};
 const NUM_DEVICE_SLOTS: u8 = 8;
 
 #[derive(Copy, Clone, Debug)]
-struct IdentityMapper;
+pub struct IdentityMapper;
 
 impl Mapper for IdentityMapper {
     unsafe fn map(&mut self, phys_start: usize, _bytes: usize) -> NonZeroUsize {
@@ -26,6 +26,7 @@ pub struct Xhc {
     registers: Registers<IdentityMapper>,
     extended_capabilities: xhci::extended_capabilities::List<IdentityMapper>,
     command_ring: Ring,
+    event_ring: EventRing,
 }
 
 impl Xhc {
@@ -44,6 +45,7 @@ impl Xhc {
             registers,
             extended_capabilities,
             command_ring: Ring::default(),
+            event_ring: EventRing::default(),
         }
     }
 
@@ -53,9 +55,22 @@ impl Xhc {
         self.set_enabled_device_slots();
         // TODO: initialize scratchpad buffer
         self.set_dcbaap();
-
         self.init_command_ring();
+        self.init_event_ring();
+        self.init_interrupter();
     }
+
+    pub fn run(&mut self) {
+        self.registers.operational.usbcmd.update(|u| {
+            u.set_run_stop(true);
+        });
+
+        while self.registers.operational.usbsts.read().hc_halted() {}
+    }
+
+    // pub fn process_event(&mut self) {
+    //
+    // }
 
     fn request_hc_ownership(&mut self) {
         for cap in self.extended_capabilities.into_iter().flatten() {
@@ -134,7 +149,33 @@ impl Xhc {
         let ptr = self.command_ring.ptr_as_u64();
         self.registers.operational.crcr.update(|c| {
             c.set_ring_cycle_state(true);
+            c.set_command_stop(false);
+            c.set_command_abort(false);
             c.set_command_ring_pointer(ptr);
+        });
+    }
+
+    fn init_event_ring(&mut self) {
+        self.event_ring
+            .initialize(
+                32,
+                self.registers
+                    .interrupt_register_set
+                    .as_single(0, IdentityMapper),
+            )
+            .expect("Failed to initialize event ring");
+    }
+
+    fn init_interrupter(&mut self) {
+        self.registers
+            .interrupt_register_set
+            .update_at(0, |primary_interrupter| {
+                primary_interrupter.iman.set_interrupt_pending(true);
+                primary_interrupter.iman.set_interrupt_enable(true);
+            });
+
+        self.registers.operational.usbcmd.update(|u| {
+            u.set_interrupter_enable(true);
         });
     }
 }

@@ -5,8 +5,7 @@ version = 3
 [[package]]
 name = "accessor"
 version = "0.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "87f830a8476933a5b4132f40015bde8f820a3c51b0047f0b380239495245a857"
+source = "git+https://github.com/ocadaruma/accessor.git?branch=rumikan#471f4da2e53d8786fb254524cbe8219b25267f6a"
 
 [[package]]
 name = "autocfg"
@@ -76,6 +75,7 @@ dependencies = [
 name = "rumikan-kernel-lib"
 version = "0.1.0"
 dependencies = [
+ "bit_field",
  "rumikan-shared",
  "xhci",
 ]
@@ -104,8 +104,7 @@ checksum = "f7fe0bb3479651439c9112f72b6c505038574c9fbb575ed1bf3b797fa39dd564"
 [[package]]
 name = "xhci"
 version = "0.5.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "34f4ed4b3331b53b9af9a6121f548e3bb5910c7d9fcbec215cd0c4cf7b149d63"
+source = "git+https://github.com/ocadaruma/xhci.git?branch=rumikan#346e40e5985389e12431f11f39e71b97a2199f69"
 dependencies = [
  "accessor",
  "bit_field",
