@@ -4,7 +4,7 @@ mod ring;
 
 use crate::usb::mem::allocate;
 use crate::usb::port::Port;
-use crate::usb::ring::{EventRing, Ring};
+use crate::usb::ring::{CommandCompletionEventTrb, EventRing, PortStatusChangeEventTrb, Ring, TransferEventTrb, Trb, TrbType, EnableSlotCommandTrb};
 use core::num::NonZeroUsize;
 use xhci::accessor::Mapper;
 use xhci::{ExtendedCapability, Registers};
@@ -23,6 +23,14 @@ impl Mapper for IdentityMapper {
         // noop
     }
 }
+
+#[derive(Debug)]
+pub enum Error {
+    InvalidPhase,
+    NotImplemented,
+}
+
+pub type Result<T> = core::result::Result<T, Error>;
 
 pub struct Xhc {
     registers: Registers<IdentityMapper>,
@@ -91,13 +99,66 @@ impl Xhc {
         )
     }
 
-    pub fn configure_port(&mut self, port: &mut Port) {
+    pub fn configure_port(&mut self, port: &mut Port) -> Result<()> {
         if self.port_config_phase[port.port_num() as usize] == ConfigPhase::NotConnected {
-            self.reset_port(port);
+            self.reset_port(port)
+        } else {
+            Ok(())
         }
     }
 
-    fn reset_port(&mut self, port: &mut Port) {
+    pub fn process_event(&mut self) -> Result<()> {
+        let result = match self.event_ring.peek_front() {
+            Some(trb) => match trb.specialized() {
+                TrbType::TransferEvent(trb) => self.on_transfer_event(trb),
+                TrbType::CommandCompletionEvent(trb) => self.on_command_completion_event(trb),
+                TrbType::PortStatusChangeEvent(trb) => self.on_port_status_change_event(trb),
+                TrbType::Unsupported => Err(Error::NotImplemented),
+            },
+            None => Ok(()),
+        };
+        self.event_ring.pop();
+        result
+    }
+
+    fn on_transfer_event(&mut self, trb: TransferEventTrb) -> Result<()> {
+        Ok(())
+    }
+
+    fn on_command_completion_event(&mut self, trb: CommandCompletionEventTrb) -> Result<()> {
+        Ok(())
+    }
+
+    fn on_port_status_change_event(&mut self, trb: PortStatusChangeEventTrb) -> Result<()> {
+        let port_id = trb.port_id();
+        let mut port = self.port_at(port_id);
+
+        match self.port_config_phase[port_id as usize] {
+            ConfigPhase::NotConnected => self.reset_port(&mut port),
+            ConfigPhase::ResettingPort => {
+                self.enable_slot(&mut port);
+                Ok(())
+            },
+            _ => Err(Error::InvalidPhase),
+        }
+    }
+
+    fn enable_slot(&mut self, port: &mut Port) {
+        if port.is_enabled() && port.is_port_reset_changed() {
+            port.clear_port_reset_change();
+            self.port_config_phase[port.port_num() as usize] = ConfigPhase::EnablingSlot;
+
+            let trb = EnableSlotCommandTrb::default();
+            self.command_ring.push(trb.data());
+
+            self.registers.doorbell.update_at(0, |d| {
+                d.set_doorbell_target(0);
+                d.set_doorbell_stream_id(0);
+            });
+        }
+    }
+
+    fn reset_port(&mut self, port: &mut Port) -> Result<()> {
         if port.is_connected() {
             match self.addressing_port {
                 Some(addressing_port) => {
@@ -111,15 +172,12 @@ impl Xhc {
                             ConfigPhase::ResettingPort;
                         port.reset();
                     }
-                    _ => {}
+                    _ => return Err(Error::InvalidPhase),
                 },
             }
         }
+        Ok(())
     }
-
-    // pub fn process_event(&mut self) {
-    //
-    // }
 
     fn request_hc_ownership(&mut self) {
         for cap in self.extended_capabilities.into_iter().flatten() {

@@ -85,7 +85,9 @@ pub extern "C" fn _start(frame_buffer_info: FrameBufferInfo) -> ! {
             );
 
             if port.is_connected() {
-                xhc.configure_port(&mut port);
+                if let Err(err) = xhc.configure_port(&mut port) {
+                    printk!("Failed to configure {} due to {:?}\n", port.port_num(), err);
+                }
             }
         }
     }

@@ -1,6 +1,8 @@
 use crate::usb::mem::allocate_array;
+use crate::usb::ring::TrbType::Unsupported;
 use crate::usb::IdentityMapper;
 use bit_field::BitField;
+use core::mem::transmute;
 use xhci::accessor;
 use xhci::registers::InterruptRegisterSet;
 
@@ -14,6 +16,80 @@ pub enum Error {
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash, Default)]
 #[repr(transparent)]
 pub struct Trb(u128);
+
+impl Trb {
+    pub fn cycle_bit(&self) -> bool {
+        self.0.get_bit(65)
+    }
+
+    pub fn specialized(&self) -> TrbType {
+        let n = self.0.get_bits(106..112) as u8;
+        match n {
+            32 => TrbType::TransferEvent(TransferEventTrb(self.0)),
+            33 => TrbType::CommandCompletionEvent(CommandCompletionEventTrb(self.0)),
+            34 => TrbType::PortStatusChangeEvent(PortStatusChangeEventTrb(self.0)),
+            _ => Unsupported,
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct TransferEventTrb(u128);
+
+#[derive(Debug)]
+pub struct CommandCompletionEventTrb(u128);
+
+#[derive(Debug)]
+pub struct PortStatusChangeEventTrb(u128);
+impl PortStatusChangeEventTrb {
+    pub fn port_id(&self) -> u8 {
+        self.0.get_bits(24..32) as u8
+    }
+}
+
+#[derive(Debug)]
+pub struct EnableSlotCommandTrb(u128);
+impl EnableSlotCommandTrb {
+    pub fn new() -> EnableSlotCommandTrb {
+        let mut bits = 0u128;
+        bits.set_bits(106..112, 9);
+        EnableSlotCommandTrb(bits)
+    }
+
+    pub fn data(&self) -> u128 {
+        self.0
+    }
+}
+
+impl Default for EnableSlotCommandTrb {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[derive(Debug)]
+pub struct LinkTrb(u128);
+impl LinkTrb {
+    pub fn new(ring_segment_pointer: u64) -> LinkTrb {
+        let mut bits = 0u128;
+        bits.set_bits(106..112, 6);
+        bits.set_bits(4..64, ring_segment_pointer as u128);
+
+        LinkTrb(bits)
+    }
+
+    pub fn set_toggle_cycle(&mut self, b: bool) {
+        self.0.set_bit(97, b);
+    }
+}
+
+#[derive(Debug)]
+pub enum TrbType {
+    Unsupported,
+    TransferEvent(TransferEventTrb),                   // 32
+    CommandCompletionEvent(CommandCompletionEventTrb), // 33
+    PortStatusChangeEvent(PortStatusChangeEventTrb),   // 34
+}
 
 /// Struct that represents command ring.
 #[derive(Debug)]
@@ -51,6 +127,34 @@ impl Ring {
     pub fn ptr_as_u64(&self) -> u64 {
         self.buffer as u64
     }
+
+    pub fn push(&mut self, data: u128) {
+        let ptr = unsafe {
+            self.buffer.add(self.write_index)
+        };
+        self.copy_to_last(data);
+
+        self.write_index += 1;
+        if self.write_index == self.len - 1 {
+            let mut link = LinkTrb::new(self.buffer as u64);
+            link.set_toggle_cycle(true);
+            self.copy_to_last(link.0);
+
+            self.write_index = 0;
+            self.cycle_bit = !self.cycle_bit;
+        }
+    }
+
+    fn copy_to_last(&mut self, data: u128) {
+        let mut msb32 = data.get_bits(96..128) as u32;
+        msb32 = (msb32 & 0xfffffffe) | (self.cycle_bit as u32);
+
+        let mut data = data;
+        data.set_bits(96..128, msb32 as u128);
+        unsafe {
+            self.buffer.add(self.write_index).write(Trb(data));
+        }
+    }
 }
 
 impl Default for Ring {
@@ -70,6 +174,14 @@ impl EventRingSegmentTableEntry {
 
     pub fn set_ring_segment_size(&mut self, size: u16) {
         self.0.set_bits(64..80, size as u128);
+    }
+
+    pub fn ring_segment_base_address(&self) -> u64 {
+        self.0.get_bits(0..64) as u64
+    }
+
+    pub fn ring_segment_size(&self) -> u16 {
+        self.0.get_bits(64..80) as u16
     }
 }
 
@@ -126,10 +238,53 @@ impl EventRing {
 
         Ok(())
     }
+
+    pub fn peek_front(&self) -> Option<Trb> {
+        let ptr: *const Trb =
+            unsafe { transmute(self.interrupter.read().erdp.event_ring_dequeue_pointer()) };
+        let trb = unsafe { *ptr };
+
+        if trb.cycle_bit() == self.cycle_bit {
+            Some(trb)
+        } else {
+            None
+        }
+    }
+
+    pub fn pop(&mut self) {
+        let ptr: *const Trb =
+            unsafe { transmute(self.interrupter.read().erdp.event_ring_dequeue_pointer()) };
+        let mut ptr = unsafe { ptr.add(1) };
+
+        let segment_begin: *const Trb =
+            unsafe { transmute((*self.segment_table).ring_segment_base_address()) };
+        let segment_end =
+            unsafe { segment_begin.add((*self.segment_table).ring_segment_size() as usize) };
+
+        if ptr == segment_end {
+            ptr = segment_begin;
+            self.cycle_bit = !self.cycle_bit;
+        }
+
+        self.interrupter.update(|i| {
+            i.erdp.set_event_ring_dequeue_pointer(ptr as u64);
+        });
+    }
 }
 
 impl Default for EventRing {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use bit_field::BitField;
+
+    #[test]
+    fn test_bit_field() {
+        let x = 0x00112000;
+        assert_eq!(x.get_bits(16..32) as u16, 17);
     }
 }
