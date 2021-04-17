@@ -4,7 +4,10 @@ mod ring;
 
 use crate::usb::mem::allocate;
 use crate::usb::port::Port;
-use crate::usb::ring::{CommandCompletionEventTrb, EventRing, PortStatusChangeEventTrb, Ring, TransferEventTrb, Trb, TrbType, EnableSlotCommandTrb};
+use crate::usb::ring::{
+    CommandCompletionEventTrb, EnableSlotCommandTrb, EventRing, PortStatusChangeEventTrb, Ring,
+    TransferEventTrb, Trb, TrbType,
+};
 use core::num::NonZeroUsize;
 use xhci::accessor::Mapper;
 use xhci::{ExtendedCapability, Registers};
@@ -138,7 +141,7 @@ impl Xhc {
             ConfigPhase::ResettingPort => {
                 self.enable_slot(&mut port);
                 Ok(())
-            },
+            }
             _ => Err(Error::InvalidPhase),
         }
     }

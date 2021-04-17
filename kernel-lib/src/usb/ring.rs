@@ -129,9 +129,7 @@ impl Ring {
     }
 
     pub fn push(&mut self, data: u128) {
-        let ptr = unsafe {
-            self.buffer.add(self.write_index)
-        };
+        let ptr = unsafe { self.buffer.add(self.write_index) };
         self.copy_to_last(data);
 
         self.write_index += 1;
