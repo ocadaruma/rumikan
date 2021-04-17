@@ -74,6 +74,20 @@ pub extern "C" fn _start(frame_buffer_info: FrameBufferInfo) -> ! {
 
         let mut xhc = Xhc::new(xhc_mmio_base);
         xhc.initialize();
+        xhc.run();
+
+        for i in 1..=xhc.max_ports() {
+            let mut port = xhc.port_at(i);
+            printk!(
+                "Port {} is_connected={}\n",
+                port.port_num(),
+                port.is_connected()
+            );
+
+            if port.is_connected() {
+                xhc.configure_port(&mut port);
+            }
+        }
     }
 
     loop {

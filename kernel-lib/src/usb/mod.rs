@@ -1,7 +1,9 @@
 mod mem;
+mod port;
 mod ring;
 
 use crate::usb::mem::allocate;
+use crate::usb::port::Port;
 use crate::usb::ring::{EventRing, Ring};
 use core::num::NonZeroUsize;
 use xhci::accessor::Mapper;
@@ -27,6 +29,8 @@ pub struct Xhc {
     extended_capabilities: xhci::extended_capabilities::List<IdentityMapper>,
     command_ring: Ring,
     event_ring: EventRing,
+    port_config_phase: [ConfigPhase; 256],
+    addressing_port: Option<u8>,
 }
 
 impl Xhc {
@@ -46,6 +50,8 @@ impl Xhc {
             extended_capabilities,
             command_ring: Ring::default(),
             event_ring: EventRing::default(),
+            port_config_phase: [ConfigPhase::NotConnected; 256],
+            addressing_port: None,
         }
     }
 
@@ -66,6 +72,49 @@ impl Xhc {
         });
 
         while self.registers.operational.usbsts.read().hc_halted() {}
+    }
+
+    pub fn max_ports(&self) -> u8 {
+        self.registers
+            .capability
+            .hcsparams1
+            .read()
+            .number_of_ports()
+    }
+
+    pub fn port_at(&self, num: u8) -> Port {
+        Port::new(
+            num,
+            self.registers
+                .port_register_set
+                .as_single(num as usize - 1, IdentityMapper),
+        )
+    }
+
+    pub fn configure_port(&mut self, port: &mut Port) {
+        if self.port_config_phase[port.port_num() as usize] == ConfigPhase::NotConnected {
+            self.reset_port(port);
+        }
+    }
+
+    fn reset_port(&mut self, port: &mut Port) {
+        if port.is_connected() {
+            match self.addressing_port {
+                Some(addressing_port) => {
+                    self.port_config_phase[addressing_port as usize] =
+                        ConfigPhase::WaitingAddressed;
+                }
+                None => match self.port_config_phase[port.port_num() as usize] {
+                    ConfigPhase::NotConnected | ConfigPhase::WaitingAddressed => {
+                        self.addressing_port = Some(port.port_num());
+                        self.port_config_phase[port.port_num() as usize] =
+                            ConfigPhase::ResettingPort;
+                        port.reset();
+                    }
+                    _ => {}
+                },
+            }
+        }
     }
 
     // pub fn process_event(&mut self) {
@@ -178,4 +227,16 @@ impl Xhc {
             u.set_interrupter_enable(true);
         });
     }
+}
+
+#[derive(Debug, Copy, Clone, Eq, PartialEq)]
+enum ConfigPhase {
+    NotConnected,
+    WaitingAddressed,
+    ResettingPort,
+    EnablingSlot,
+    AddressingDevice,
+    InitializingDevice,
+    ConfiguringEndpoints,
+    Configured,
 }
