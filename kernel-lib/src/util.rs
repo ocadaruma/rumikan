@@ -4,7 +4,7 @@ use core::mem::MaybeUninit;
 #[derive(Debug)]
 pub struct ArrayVec<T, const N: usize>
 where
-    T: Default
+    T: Default,
 {
     buf: [T; N],
     len: usize,
@@ -57,6 +57,7 @@ where
 }
 
 /// Fixed-sized array backed map.
+#[derive(Debug)]
 pub struct ArrayMap<K, V, const N: usize> {
     buf: [Option<(K, V)>; N],
 }

@@ -1,4 +1,5 @@
 mod classdriver;
+mod descriptor;
 mod devmgr;
 mod endpoint;
 mod mem;
@@ -118,7 +119,7 @@ impl Xhc {
 
     pub fn process_event(&mut self) -> Result<()> {
         let result = match self.event_ring.peek_front() {
-            Some(trb) => match trb.specialized() {
+            Some(trb) => match trb.specialize() {
                 TrbType::TransferEvent(trb) => self.on_transfer_event(trb),
                 TrbType::CommandCompletionEvent(trb) => self.on_command_completion_event(trb),
                 TrbType::PortStatusChangeEvent(trb) => self.on_port_status_change_event(trb),
@@ -132,9 +133,10 @@ impl Xhc {
 
     fn on_transfer_event(&mut self, trb: TransferEventTrb) -> Result<()> {
         let slot_id = trb.slot_id();
-        // match self.device_manager.find_by_slot(slot_id) {
-        //
-        // }
+        if let Some(dev) = self.device_manager.find_by_slot(slot_id) {
+        } else {
+            return Err(Error::InvalidSlotId);
+        }
         unimplemented!()
     }
 

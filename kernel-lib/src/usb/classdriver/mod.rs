@@ -1,4 +1,12 @@
 use crate::usb::endpoint::EndpointId;
+use crate::usb::ring::SetupData;
+
+#[derive(Debug)]
+pub enum Error {
+    NotImplemented,
+}
+
+pub type Result<T> = core::result::Result<T, Error>;
 
 #[derive(Debug, Copy, Clone)]
 pub enum ClassDriver {
@@ -6,12 +14,27 @@ pub enum ClassDriver {
 }
 
 impl ClassDriver {
-    pub fn on_interrupt_completed(&self, ep_id: EndpointId, buf: *const (), len: u32) {
+    pub fn on_interrupt_completed(
+        &self,
+        ep_id: EndpointId,
+        buf: *const (),
+        len: u32,
+    ) -> Result<()> {
         match self {
             ClassDriver::HidMouse(driver) => {
                 unsafe { driver.read() }.on_interrupt_completed(ep_id, buf, len)
             }
         }
+        unimplemented!()
+    }
+
+    pub fn on_control_completed(
+        &self,
+        ep_id: EndpointId,
+        setup_data: SetupData,
+        buf: *const (),
+        len: u32,
+    ) -> Result<()> {
         unimplemented!()
     }
 }

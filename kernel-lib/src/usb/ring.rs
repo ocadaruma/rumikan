@@ -23,21 +23,30 @@ impl Trb {
         self.0.get_bit(65)
     }
 
-    pub fn specialized(&self) -> TrbType {
+    pub fn specialize(&self) -> TrbType {
         let n = self.0.get_bits(106..112) as u8;
         match n {
-            1 => TrbType::Normal(NormalTrb(self.0)),
-            32 => TrbType::TransferEvent(TransferEventTrb(self.0)),
-            33 => TrbType::CommandCompletionEvent(CommandCompletionEventTrb(self.0)),
-            34 => TrbType::PortStatusChangeEvent(PortStatusChangeEventTrb(self.0)),
+            NormalTrb::TYPE => TrbType::Normal(NormalTrb(self.0)),
+            TransferEventTrb::TYPE => TrbType::TransferEvent(TransferEventTrb(self.0)),
+            CommandCompletionEventTrb::TYPE => {
+                TrbType::CommandCompletionEvent(CommandCompletionEventTrb(self.0))
+            }
+            PortStatusChangeEventTrb::TYPE => {
+                TrbType::PortStatusChangeEvent(PortStatusChangeEventTrb(self.0))
+            }
+            DataStageTrb::TYPE => TrbType::DataStage(DataStageTrb(self.0)),
+            StatusStageTrb::TYPE => TrbType::StatusStage(StatusStageTrb(self.0)),
             _ => Unsupported,
         }
     }
 }
 
 #[derive(Debug)]
+#[repr(transparent)]
 pub struct TransferEventTrb(u128);
 impl TransferEventTrb {
+    pub const TYPE: u8 = 32;
+
     pub fn slot_id(&self) -> u8 {
         self.0.get_bits(120..128) as u8
     }
@@ -60,19 +69,29 @@ impl TransferEventTrb {
 }
 
 #[derive(Debug)]
+#[repr(transparent)]
 pub struct CommandCompletionEventTrb(u128);
+impl CommandCompletionEventTrb {
+    pub const TYPE: u8 = 33;
+}
 
 #[derive(Debug)]
+#[repr(transparent)]
 pub struct PortStatusChangeEventTrb(u128);
 impl PortStatusChangeEventTrb {
+    pub const TYPE: u8 = 34;
+
     pub fn port_id(&self) -> u8 {
         self.0.get_bits(24..32) as u8
     }
 }
 
 #[derive(Debug)]
+#[repr(transparent)]
 pub struct EnableSlotCommandTrb(u128);
 impl EnableSlotCommandTrb {
+    pub const TYPE: u8 = 9;
+
     pub fn new() -> EnableSlotCommandTrb {
         let mut bits = 0u128;
         bits.set_bits(106..112, 9);
@@ -91,8 +110,11 @@ impl Default for EnableSlotCommandTrb {
 }
 
 #[derive(Debug)]
+#[repr(transparent)]
 pub struct LinkTrb(u128);
 impl LinkTrb {
+    pub const TYPE: u8 = 6;
+
     pub fn new(ring_segment_pointer: u64) -> LinkTrb {
         let mut bits = 0u128;
         bits.set_bits(106..112, 6);
@@ -107,8 +129,11 @@ impl LinkTrb {
 }
 
 #[derive(Debug)]
+#[repr(transparent)]
 pub struct NormalTrb(u128);
 impl NormalTrb {
+    pub const TYPE: u8 = 1;
+
     pub fn transfer_length(&self) -> u32 {
         self.0.get_bits(64..81) as u32
     }
@@ -119,12 +144,95 @@ impl NormalTrb {
 }
 
 #[derive(Debug)]
+#[repr(transparent)]
+pub struct SetupStageTrb(u128);
+impl SetupStageTrb {
+    pub const TYPE: u8 = 2;
+
+    pub fn request_type(&self) -> u8 {
+        self.0.get_bits(0..8) as u8
+    }
+
+    pub fn request(&self) -> u8 {
+        self.0.get_bits(8..16) as u8
+    }
+
+    pub fn value(&self) -> u16 {
+        self.0.get_bits(16..32) as u16
+    }
+
+    pub fn index(&self) -> u16 {
+        self.0.get_bits(32..48) as u16
+    }
+
+    pub fn length(&self) -> u16 {
+        self.0.get_bits(48..64) as u16
+    }
+}
+
+#[derive(Debug)]
+#[repr(transparent)]
+pub struct DataStageTrb(u128);
+impl DataStageTrb {
+    pub const TYPE: u8 = 3;
+
+    pub fn data_buffer_pointer(&self) -> *const () {
+        unsafe { transmute(self.0.get_bits(0..64) as u64) }
+    }
+
+    pub fn trb_transfer_length(&self) -> u32 {
+        self.0.get_bits(64..81) as u32
+    }
+}
+
+#[derive(Debug)]
+#[repr(transparent)]
+pub struct StatusStageTrb(u128);
+impl StatusStageTrb {
+    pub const TYPE: u8 = 4;
+}
+
+#[derive(Debug, Eq, PartialEq)]
+#[repr(transparent)]
+pub struct SetupData(u64);
+impl SetupData {
+    pub fn from_trb(setup_stage_trb: SetupStageTrb) -> SetupData {
+        let mut data = 0u64;
+
+        data.set_bits(0..8, setup_stage_trb.request_type() as u64);
+        data.set_bits(8..16, setup_stage_trb.request() as u64);
+        data.set_bits(16..32, setup_stage_trb.value() as u64);
+        data.set_bits(32..48, setup_stage_trb.index() as u64);
+        data.set_bits(48..64, setup_stage_trb.length() as u64);
+
+        SetupData(data)
+    }
+
+    pub fn request(&self) -> Request {
+        match self.0.get_bits(8..16) as u8 {
+            6 => Request::GetDescriptor,
+            9 => Request::SetConfiguration,
+            _ => Request::Unsupported,
+        }
+    }
+}
+
+#[derive(Debug, Eq, PartialEq, Copy, Clone)]
+pub enum Request {
+    Unsupported,
+    GetDescriptor,
+    SetConfiguration,
+}
+
+#[derive(Debug)]
 pub enum TrbType {
     Unsupported,
-    Normal(NormalTrb),                                 // 1
-    TransferEvent(TransferEventTrb),                   // 32
-    CommandCompletionEvent(CommandCompletionEventTrb), // 33
-    PortStatusChangeEvent(PortStatusChangeEventTrb),   // 34
+    Normal(NormalTrb),
+    TransferEvent(TransferEventTrb),
+    CommandCompletionEvent(CommandCompletionEventTrb),
+    PortStatusChangeEvent(PortStatusChangeEventTrb),
+    DataStage(DataStageTrb),
+    StatusStage(StatusStageTrb),
 }
 
 /// Struct that represents command ring.
