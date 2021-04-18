@@ -4,7 +4,7 @@ use core::mem::MaybeUninit;
 #[derive(Debug)]
 pub struct ArrayVec<T, const N: usize>
 where
-    T: Copy + Default,
+    T: Default
 {
     buf: [T; N],
     len: usize,
@@ -20,11 +20,15 @@ pub type Result<T> = core::result::Result<T, ArrayVecError>;
 #[allow(clippy::len_without_is_empty)]
 impl<T, const N: usize> ArrayVec<T, N>
 where
-    T: Copy + Default,
+    T: Default,
 {
     pub fn new() -> ArrayVec<T, N> {
+        let mut array: [MaybeUninit<T>; N] = MaybeUninit::uninit_array();
+        for elem in array.iter_mut() {
+            *elem = MaybeUninit::new(T::default());
+        }
         ArrayVec {
-            buf: [T::default(); N],
+            buf: unsafe { MaybeUninit::array_assume_init(array) },
             len: 0,
         }
     }
