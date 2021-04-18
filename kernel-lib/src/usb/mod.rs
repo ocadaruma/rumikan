@@ -1,7 +1,11 @@
+mod classdriver;
+mod devmgr;
+mod endpoint;
 mod mem;
 mod port;
 mod ring;
 
+use crate::usb::devmgr::DeviceManager;
 use crate::usb::mem::allocate;
 use crate::usb::port::Port;
 use crate::usb::ring::{
@@ -11,8 +15,6 @@ use crate::usb::ring::{
 use core::num::NonZeroUsize;
 use xhci::accessor::Mapper;
 use xhci::{ExtendedCapability, Registers};
-
-const NUM_DEVICE_SLOTS: u8 = 8;
 
 #[derive(Copy, Clone, Debug)]
 pub struct IdentityMapper;
@@ -31,6 +33,7 @@ impl Mapper for IdentityMapper {
 pub enum Error {
     InvalidPhase,
     NotImplemented,
+    InvalidSlotId,
 }
 
 pub type Result<T> = core::result::Result<T, Error>;
@@ -38,6 +41,7 @@ pub type Result<T> = core::result::Result<T, Error>;
 pub struct Xhc {
     registers: Registers<IdentityMapper>,
     extended_capabilities: xhci::extended_capabilities::List<IdentityMapper>,
+    device_manager: DeviceManager,
     command_ring: Ring,
     event_ring: EventRing,
     port_config_phase: [ConfigPhase; 256],
@@ -59,6 +63,7 @@ impl Xhc {
         Xhc {
             registers,
             extended_capabilities,
+            device_manager: DeviceManager::new(),
             command_ring: Ring::default(),
             event_ring: EventRing::default(),
             port_config_phase: [ConfigPhase::NotConnected; 256],
@@ -67,6 +72,9 @@ impl Xhc {
     }
 
     pub fn initialize(&mut self) {
+        self.device_manager
+            .initialize()
+            .expect("Failed to initialize device manager");
         self.request_hc_ownership();
         self.initialize_host_controller();
         self.set_enabled_device_slots();
@@ -96,9 +104,7 @@ impl Xhc {
     pub fn port_at(&self, num: u8) -> Port {
         Port::new(
             num,
-            self.registers
-                .port_register_set
-                .as_single(num as usize - 1, IdentityMapper),
+            self.registers.port_register_set.single_at(num as usize - 1),
         )
     }
 
@@ -116,7 +122,7 @@ impl Xhc {
                 TrbType::TransferEvent(trb) => self.on_transfer_event(trb),
                 TrbType::CommandCompletionEvent(trb) => self.on_command_completion_event(trb),
                 TrbType::PortStatusChangeEvent(trb) => self.on_port_status_change_event(trb),
-                TrbType::Unsupported => Err(Error::NotImplemented),
+                _ => Err(Error::NotImplemented),
             },
             None => Ok(()),
         };
@@ -125,11 +131,15 @@ impl Xhc {
     }
 
     fn on_transfer_event(&mut self, trb: TransferEventTrb) -> Result<()> {
-        Ok(())
+        let slot_id = trb.slot_id();
+        // match self.device_manager.find_by_slot(slot_id) {
+        //
+        // }
+        unimplemented!()
     }
 
     fn on_command_completion_event(&mut self, trb: CommandCompletionEventTrb) -> Result<()> {
-        Ok(())
+        unimplemented!()
     }
 
     fn on_port_status_change_event(&mut self, trb: PortStatusChangeEventTrb) -> Result<()> {
@@ -227,29 +237,17 @@ impl Xhc {
             .read()
             .number_of_device_slots();
         printk!("Max device slots: {}\n", num_device_slots);
+
+        let max_slots = self.device_manager.max_slots() as u8;
         self.registers
             .operational
             .config
-            .update(|c| c.set_max_device_slots_enabled(NUM_DEVICE_SLOTS));
+            .update(|c| c.set_max_device_slots_enabled(max_slots));
     }
 
     fn set_dcbaap(&mut self) {
-        let device_context_size: usize =
-            if self.registers.capability.hccparams1.read().context_size() {
-                2048
-            } else {
-                1024
-            };
-        let ptr = allocate::<()>(
-            device_context_size * (NUM_DEVICE_SLOTS as usize + 1),
-            Some(64),
-            Some(4096),
-        )
-        .expect("Not enough memory");
-        self.registers
-            .operational
-            .dcbaap
-            .update(|d| d.set(ptr as u64));
+        let ptr = self.device_manager.dcbaa_ptr();
+        self.registers.operational.dcbaap.update(|d| d.set(ptr));
     }
 
     fn init_command_ring(&mut self) {
@@ -267,12 +265,7 @@ impl Xhc {
 
     fn init_event_ring(&mut self) {
         self.event_ring
-            .initialize(
-                32,
-                self.registers
-                    .interrupt_register_set
-                    .as_single(0, IdentityMapper),
-            )
+            .initialize(32, self.registers.interrupt_register_set.single_at(0))
             .expect("Failed to initialize event ring");
     }
 

@@ -1,3 +1,4 @@
+use crate::usb::endpoint::EndpointId;
 use crate::usb::mem::allocate_array;
 use crate::usb::ring::TrbType::Unsupported;
 use crate::usb::IdentityMapper;
@@ -25,6 +26,7 @@ impl Trb {
     pub fn specialized(&self) -> TrbType {
         let n = self.0.get_bits(106..112) as u8;
         match n {
+            1 => TrbType::Normal(NormalTrb(self.0)),
             32 => TrbType::TransferEvent(TransferEventTrb(self.0)),
             33 => TrbType::CommandCompletionEvent(CommandCompletionEventTrb(self.0)),
             34 => TrbType::PortStatusChangeEvent(PortStatusChangeEventTrb(self.0)),
@@ -35,6 +37,27 @@ impl Trb {
 
 #[derive(Debug)]
 pub struct TransferEventTrb(u128);
+impl TransferEventTrb {
+    pub fn slot_id(&self) -> u8 {
+        self.0.get_bits(120..128) as u8
+    }
+
+    pub fn transfer_length(&self) -> u32 {
+        self.0.get_bits(64..88) as u32
+    }
+
+    pub fn completion_code(&self) -> u8 {
+        self.0.get_bits(88..96) as u8
+    }
+
+    pub fn trb_pointer(&self) -> *const Trb {
+        unsafe { transmute(self.0.get_bits(0..64) as u64) }
+    }
+
+    pub fn endpoint_id(&self) -> EndpointId {
+        EndpointId::new(self.0.get_bits(112..117) as u32)
+    }
+}
 
 #[derive(Debug)]
 pub struct CommandCompletionEventTrb(u128);
@@ -84,8 +107,21 @@ impl LinkTrb {
 }
 
 #[derive(Debug)]
+pub struct NormalTrb(u128);
+impl NormalTrb {
+    pub fn transfer_length(&self) -> u32 {
+        self.0.get_bits(64..81) as u32
+    }
+
+    pub fn pointer(&self) -> *const () {
+        unsafe { transmute(self.0.get_bits(0..64) as u64) }
+    }
+}
+
+#[derive(Debug)]
 pub enum TrbType {
     Unsupported,
+    Normal(NormalTrb),                                 // 1
     TransferEvent(TransferEventTrb),                   // 32
     CommandCompletionEvent(CommandCompletionEventTrb), // 33
     PortStatusChangeEvent(PortStatusChangeEventTrb),   // 34

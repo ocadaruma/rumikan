@@ -5,7 +5,7 @@ version = 3
 [[package]]
 name = "accessor"
 version = "0.3.0"
-source = "git+https://github.com/ocadaruma/accessor.git?branch=rumikan#471f4da2e53d8786fb254524cbe8219b25267f6a"
+source = "git+https://github.com/ocadaruma/accessor.git?branch=rumikan#64b459bc7f5c8edddcedc8f25c21273f78342754"
 
 [[package]]
 name = "autocfg"

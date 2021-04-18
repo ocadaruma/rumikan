@@ -27,7 +27,7 @@ jobs:
       - name: Build
         run: ./cargo-all.sh build
       - name: Test
-        run: ./cargo-all.sh test
+        run: ./cargo-all.sh test -- --test-threads=1
   lint:
     runs-on: ubuntu-latest
     steps:
