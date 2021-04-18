@@ -4,16 +4,18 @@ use core::slice::from_raw_parts;
 #[derive(Debug)]
 pub struct Descriptor(*const u8);
 impl Descriptor {
+    pub fn new(buf: *const u8) -> Descriptor {
+        Descriptor(buf)
+    }
+
     pub fn specialize(&self) -> DescriptorType {
         match unsafe { self.0.add(1).read() } {
-            DeviceDescriptor::TYPE => DescriptorType::Device(DeviceDescriptor(unsafe {
-                *transmute::<_, *const [u8; 18]>(self.0)
-            })),
-            ConfigurationDescriptor::TYPE => {
-                DescriptorType::Configuration(ConfigurationDescriptor(unsafe {
-                    *transmute::<_, *const [u8; 9]>(self.0)
-                }))
-            }
+            DeviceDescriptor::TYPE => DescriptorType::Device(unsafe {
+                transmute::<_, *const DeviceDescriptor>(self.0).read()
+            }),
+            ConfigurationDescriptor::TYPE => DescriptorType::Configuration(unsafe {
+                transmute::<_, *const ConfigurationDescriptor>(self.0).read()
+            }),
             _ => DescriptorType::Unsupported,
         }
     }

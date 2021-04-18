@@ -1,7 +1,10 @@
 use crate::usb::classdriver::ClassDriver;
+use crate::usb::descriptor::{
+    ConfigurationDescriptor, Descriptor, DescriptorType, DeviceDescriptor,
+};
 use crate::usb::endpoint::EndpointId;
 use crate::usb::mem::allocate;
-use crate::usb::ring::{SetupData, SetupStageTrb, TransferEventTrb, Trb, TrbType};
+use crate::usb::ring::{Request, SetupData, SetupStageTrb, TransferEventTrb, Trb, TrbType};
 use crate::util::ArrayMap;
 use core::mem::size_of;
 use core::ptr::{null, null_mut};
@@ -15,6 +18,7 @@ pub enum Error {
     NoCorrespondingSetupStage,
     NotImplemented,
     ClassDriverError(crate::usb::classdriver::Error),
+    InvalidPhase,
 }
 
 pub type Result<T> = core::result::Result<T, Error>;
@@ -158,6 +162,46 @@ impl UsbDevice {
             }
             return Err(Error::NoWaiter);
         }
+        match self.initialize_phase {
+            1 => {
+                if setup_data.request() == Request::GetDescriptor {
+                    if let DescriptorType::Device(_) =
+                        Descriptor::new(buf as *const u8).specialize()
+                    {
+                        return self.initialize_phase1();
+                    }
+                }
+                Err(Error::InvalidPhase)
+            }
+            2 => {
+                if setup_data.request() == Request::GetDescriptor {
+                    if let DescriptorType::Configuration(desc) =
+                        Descriptor::new(buf as *const u8).specialize()
+                    {
+                        return self.initialize_phase2(desc, len);
+                    }
+                }
+                Err(Error::InvalidPhase)
+            }
+            3 => {
+                if setup_data.request() == Request::SetConfiguration {
+                    return self.initialize_phase3((setup_data.value() & 0xff) as u8);
+                }
+                Err(Error::InvalidPhase)
+            }
+            _ => Err(Error::NotImplemented),
+        }
+    }
+
+    fn initialize_phase1(&mut self) -> Result<()> {
+        unimplemented!()
+    }
+
+    fn initialize_phase2(&mut self, desc: ConfigurationDescriptor, len: u32) -> Result<()> {
+        unimplemented!()
+    }
+
+    fn initialize_phase3(&mut self, config_value: u8) -> Result<()> {
         unimplemented!()
     }
 }

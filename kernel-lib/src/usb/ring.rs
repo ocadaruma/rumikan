@@ -215,6 +215,10 @@ impl SetupData {
             _ => Request::Unsupported,
         }
     }
+
+    pub fn value(&self) -> u16 {
+        self.0.get_bits(16..32) as u16
+    }
 }
 
 #[derive(Debug, Eq, PartialEq, Copy, Clone)]
