@@ -1,4 +1,4 @@
-use crate::usb::endpoint::EndpointId;
+use crate::usb::endpoint::{EndpointConfig, EndpointId};
 use crate::usb::ring::SetupData;
 
 #[derive(Debug)]
@@ -35,6 +35,10 @@ impl ClassDriver {
         buf: *const (),
         len: u32,
     ) -> Result<()> {
+        unimplemented!()
+    }
+
+    pub fn set_endpoint(&mut self, config: &EndpointConfig) {
         unimplemented!()
     }
 }

@@ -92,10 +92,10 @@ pub struct EnableSlotCommandTrb(u128);
 impl EnableSlotCommandTrb {
     pub const TYPE: u8 = 9;
 
-    pub fn new() -> EnableSlotCommandTrb {
+    pub fn new() -> Self {
         let mut bits = 0u128;
-        bits.set_bits(106..112, 9);
-        EnableSlotCommandTrb(bits)
+        bits.set_bits(106..112, Self::TYPE as u128);
+        Self(bits)
     }
 
     pub fn data(&self) -> u128 {
@@ -115,12 +115,12 @@ pub struct LinkTrb(u128);
 impl LinkTrb {
     pub const TYPE: u8 = 6;
 
-    pub fn new(ring_segment_pointer: u64) -> LinkTrb {
+    pub fn new(ring_segment_pointer: u64) -> Self {
         let mut bits = 0u128;
-        bits.set_bits(106..112, 6);
+        bits.set_bits(106..112, Self::TYPE as u128);
         bits.set_bits(4..64, ring_segment_pointer as u128);
 
-        LinkTrb(bits)
+        Self(bits)
     }
 
     pub fn set_toggle_cycle(&mut self, b: bool) {
@@ -149,6 +149,26 @@ pub struct SetupStageTrb(u128);
 impl SetupStageTrb {
     pub const TYPE: u8 = 2;
 
+    pub const TRANSFER_TYPE_NO_DATA_STAGE: u8 = 0;
+    pub const TRANSFER_TYPE_IN_DATA_STAGE: u8 = 3;
+
+    pub fn from(setup_data: &SetupData, transfer_type: u8) -> Self {
+        let mut bits = 0u128;
+        bits.set_bits(106..112, Self::TYPE as u128);
+
+        bits.set_bits(64..17, 8); // transfer_length
+        bits.set_bit(102, true); // immediate_data
+        bits.set_bits(112..114, transfer_type as u128);
+
+        bits.set_bits(0..8, setup_data.request_type() as u128);
+        bits.set_bits(8..16, setup_data.request() as u128);
+        bits.set_bits(16..32, setup_data.value() as u128);
+        bits.set_bits(32..48, setup_data.index() as u128);
+        bits.set_bits(48..64, setup_data.length() as u128);
+
+        Self(bits)
+    }
+
     pub fn request_type(&self) -> u8 {
         self.0.get_bits(0..8) as u8
     }
@@ -168,6 +188,10 @@ impl SetupStageTrb {
     pub fn length(&self) -> u16 {
         self.0.get_bits(48..64) as u16
     }
+
+    pub fn data(&self) -> u128 {
+        self.0
+    }
 }
 
 #[derive(Debug)]
@@ -176,12 +200,33 @@ pub struct DataStageTrb(u128);
 impl DataStageTrb {
     pub const TYPE: u8 = 3;
 
+    pub fn from(buf: *const (), len: u32, is_in: bool) -> Self {
+        let mut bits = 0u128;
+        bits.set_bits(106..112, Self::TYPE as u128);
+
+        bits.set_bits(0..64, buf as u128);
+        bits.set_bits(64..81, len as u128);
+        bits.set_bits(81..86, 0); // td_size
+        bits.set_bit(112, is_in);
+
+        Self(bits)
+    }
+
+    pub fn set_interrupt_on_completion(mut self, b: bool) -> Self {
+        self.0.set_bit(101, b);
+        self
+    }
+
     pub fn data_buffer_pointer(&self) -> *const () {
         unsafe { transmute(self.0.get_bits(0..64) as u64) }
     }
 
     pub fn trb_transfer_length(&self) -> u32 {
         self.0.get_bits(64..81) as u32
+    }
+
+    pub fn data(&self) -> u128 {
+        self.0
     }
 }
 
@@ -190,42 +235,122 @@ impl DataStageTrb {
 pub struct StatusStageTrb(u128);
 impl StatusStageTrb {
     pub const TYPE: u8 = 4;
+
+    pub fn new() -> Self {
+        let mut bits = 0u128;
+        bits.set_bits(106..112, Self::TYPE as u128);
+
+        Self(bits)
+    }
+
+    pub fn set_direction(mut self, is_in: bool) -> Self {
+        self.0.set_bit(112, is_in);
+        self
+    }
+
+    pub fn set_interrupt_on_completion(mut self, b: bool) -> Self {
+        self.0.set_bit(101, b);
+        self
+    }
+
+    pub fn data(&self) -> u128 {
+        self.0
+    }
 }
 
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Debug, Eq, PartialEq, Copy, Clone)]
 #[repr(transparent)]
 pub struct SetupData(u64);
 impl SetupData {
-    pub fn from_trb(setup_stage_trb: SetupStageTrb) -> SetupData {
-        let mut data = 0u64;
+    pub const REQUEST_GET_DESCRIPTOR: u8 = 6;
+    pub const REQUEST_SET_CONFIGURATION: u8 = 9;
 
-        data.set_bits(0..8, setup_stage_trb.request_type() as u64);
-        data.set_bits(8..16, setup_stage_trb.request() as u64);
-        data.set_bits(16..32, setup_stage_trb.value() as u64);
-        data.set_bits(32..48, setup_stage_trb.index() as u64);
-        data.set_bits(48..64, setup_stage_trb.length() as u64);
-
-        SetupData(data)
+    pub fn new() -> Self {
+        Self(0)
     }
 
-    pub fn request(&self) -> Request {
-        match self.0.get_bits(8..16) as u8 {
-            6 => Request::GetDescriptor,
-            9 => Request::SetConfiguration,
-            _ => Request::Unsupported,
-        }
+    pub fn from_trb(setup_stage_trb: SetupStageTrb) -> Self {
+        Self::new()
+            .set_request_type(RequestType(setup_stage_trb.request_type()))
+            .set_request(setup_stage_trb.request())
+            .set_value(setup_stage_trb.value())
+            .set_index(setup_stage_trb.index())
+            .set_length(setup_stage_trb.length())
+    }
+
+    pub fn request_type(&self) -> u8 {
+        self.0.get_bits(0..8) as u8
+    }
+
+    pub fn set_request_type(mut self, t: RequestType) -> Self {
+        self.0.set_bits(0..8, t.0 as u64);
+        self
+    }
+
+    pub fn request(&self) -> u8 {
+        self.0.get_bits(8..16) as u8
+    }
+
+    pub fn set_request(mut self, r: u8) -> Self {
+        self.0.set_bits(8..16, r as u64);
+        self
     }
 
     pub fn value(&self) -> u16 {
         self.0.get_bits(16..32) as u16
     }
+
+    pub fn set_value(mut self, v: u16) -> Self {
+        self.0.set_bits(16..32, v as u64);
+        self
+    }
+
+    pub fn index(&self) -> u16 {
+        self.0.get_bits(32..48) as u16
+    }
+
+    pub fn set_index(mut self, i: u16) -> Self {
+        self.0.set_bits(32..48, i as u64);
+        self
+    }
+
+    pub fn length(&self) -> u16 {
+        self.0.get_bits(48..64) as u16
+    }
+
+    pub fn set_length(mut self, l: u16) -> Self {
+        self.0.set_bits(48..64, l as u64);
+        self
+    }
 }
 
-#[derive(Debug, Eq, PartialEq, Copy, Clone)]
-pub enum Request {
-    Unsupported,
-    GetDescriptor,
-    SetConfiguration,
+#[repr(transparent)]
+#[derive(Debug, Eq, PartialEq)]
+pub struct RequestType(u8);
+impl RequestType {
+    pub const DIRECTION_OUT: u8 = 0;
+    pub const DIRECTION_IN: u8 = 1;
+    pub const TYPE_STANDARD: u8 = 0;
+    pub const RECIPIENT_DEVICE: u8 = 0;
+
+    pub fn new() -> Self {
+        Self(0)
+    }
+
+    pub fn set_direction(mut self, d: u8) -> Self {
+        self.0.set_bits(7..8, d);
+        self
+    }
+
+    pub fn set_type(mut self, t: u8) -> Self {
+        self.0.set_bits(5..7, t);
+        self
+    }
+
+    pub fn set_recipient(mut self, r: u8) -> Self {
+        self.0.set_bits(0..5, r);
+        self
+    }
 }
 
 #[derive(Debug)]
@@ -249,8 +374,8 @@ pub struct Ring {
 }
 
 impl Ring {
-    pub fn new() -> Ring {
-        Ring {
+    pub fn new() -> Self {
+        Self {
             buffer: core::ptr::null_mut(),
             len: 0,
             cycle_bit: false,
@@ -276,7 +401,7 @@ impl Ring {
         self.buffer as u64
     }
 
-    pub fn push(&mut self, data: u128) {
+    pub fn push(&mut self, data: u128) -> *const Trb {
         let ptr = unsafe { self.buffer.add(self.write_index) };
         self.copy_to_last(data);
 
@@ -289,6 +414,8 @@ impl Ring {
             self.write_index = 0;
             self.cycle_bit = !self.cycle_bit;
         }
+
+        ptr
     }
 
     fn copy_to_last(&mut self, data: u128) {

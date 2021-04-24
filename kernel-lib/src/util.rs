@@ -2,10 +2,7 @@ use core::mem::MaybeUninit;
 
 /// Fixed-sized array-backed vector.
 #[derive(Debug)]
-pub struct ArrayVec<T, const N: usize>
-where
-    T: Default,
-{
+pub struct ArrayVec<T, const N: usize> {
     buf: [T; N],
     len: usize,
 }
@@ -18,14 +15,11 @@ pub enum ArrayVecError {
 pub type Result<T> = core::result::Result<T, ArrayVecError>;
 
 #[allow(clippy::len_without_is_empty)]
-impl<T, const N: usize> ArrayVec<T, N>
-where
-    T: Default,
-{
+impl<T, const N: usize> ArrayVec<T, N> {
     pub fn new() -> ArrayVec<T, N> {
         let mut array: [MaybeUninit<T>; N] = MaybeUninit::uninit_array();
         for elem in array.iter_mut() {
-            *elem = MaybeUninit::new(T::default());
+            *elem = MaybeUninit::zeroed();
         }
         ArrayVec {
             buf: unsafe { MaybeUninit::array_assume_init(array) },
