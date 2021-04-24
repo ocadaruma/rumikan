@@ -1,3 +1,5 @@
+use crate::usb::descriptor::EndpointDescriptor;
+
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub struct EndpointId(u32);
 
@@ -39,4 +41,10 @@ pub struct EndpointConfig {
     pub endpoint_type: EndpointType,
     pub max_packet_size: usize,
     pub interval: u32,
+}
+
+impl EndpointConfig {
+    pub fn from(desc: &EndpointDescriptor) -> Self {
+        todo!()
+    }
 }

@@ -150,6 +150,7 @@ impl SetupStageTrb {
     pub const TYPE: u8 = 2;
 
     pub const TRANSFER_TYPE_NO_DATA_STAGE: u8 = 0;
+    pub const TRANSFER_TYPE_OUT_DATA_STAGE: u8 = 3;
     pub const TRANSFER_TYPE_IN_DATA_STAGE: u8 = 3;
 
     pub fn from(setup_data: &SetupData, transfer_type: u8) -> Self {

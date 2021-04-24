@@ -1,3 +1,4 @@
+use crate::usb::descriptor::InterfaceDescriptor;
 use crate::usb::endpoint::{EndpointConfig, EndpointId};
 use crate::usb::ring::SetupData;
 
@@ -14,6 +15,10 @@ pub enum ClassDriver {
 }
 
 impl ClassDriver {
+    pub fn new(desc: &InterfaceDescriptor) -> Option<Self> {
+        todo!()
+    }
+
     pub fn on_interrupt_completed(
         &self,
         ep_id: EndpointId,

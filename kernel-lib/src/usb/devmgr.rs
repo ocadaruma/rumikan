@@ -187,10 +187,9 @@ impl UsbDevice {
             }
             2 => {
                 if setup_data.request() == SetupData::REQUEST_GET_DESCRIPTOR {
-                    if let DescriptorType::Configuration(desc) =
-                        Descriptor::new(buf as *const u8).specialize()
-                    {
-                        return self.initialize_phase2(desc, len);
+                    let desc = Descriptor::new(buf as *const u8);
+                    if let DescriptorType::Configuration(config_desc) = desc.specialize() {
+                        return self.initialize_phase2(desc, config_desc, len);
                     }
                 }
                 Err(Error::InvalidPhase)
@@ -216,8 +215,45 @@ impl UsbDevice {
         )
     }
 
-    fn initialize_phase2(&mut self, desc: ConfigurationDescriptor, len: u32) -> Result<()> {
-        unimplemented!()
+    fn initialize_phase2(
+        &mut self,
+        desc: Descriptor,
+        config_desc: ConfigurationDescriptor,
+        len: u32,
+    ) -> Result<()> {
+        let mut iter = desc.iter(len as usize);
+
+        let mut class_driver_found = false;
+        while let Some(desc_type) = iter.next() {
+            if let DescriptorType::Interface(interface_desc) = desc_type {
+                if let Some(class_driver) = ClassDriver::new(&interface_desc) {
+                    class_driver_found = true;
+                    for _ in 0..interface_desc.num_endpoints() {
+                        match iter.next() {
+                            Some(DescriptorType::Endpoint(ep_desc)) => {
+                                let conf = EndpointConfig::from(&ep_desc);
+                                self.class_drivers[conf.endpoint_id.number() as usize] =
+                                    Some(class_driver);
+                                self.ep_configs.add(conf);
+                            }
+                            Some(DescriptorType::Hid(_)) => {
+                                // noop
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+                break;
+            }
+        }
+        if !class_driver_found {
+            return Ok(());
+        }
+        self.initialize_phase = 3;
+        self.set_configuration(
+            EndpointId::DEFAULT_CONTROL_PIPE_ID,
+            config_desc.configuration_value(),
+        )
     }
 
     fn initialize_phase3(&mut self) -> Result<()> {
@@ -253,15 +289,30 @@ impl UsbDevice {
         self.control_in(endpoint_id, setup_data, buf, len, None)
     }
 
+    fn set_configuration(&mut self, endpoint_id: EndpointId, config_value: u8) -> Result<()> {
+        let setup_data = SetupData::new()
+            .set_request_type(
+                RequestType::new()
+                    .set_direction(RequestType::DIRECTION_OUT)
+                    .set_type(RequestType::TYPE_STANDARD)
+                    .set_recipient(RequestType::RECIPIENT_DEVICE),
+            )
+            .set_request(SetupData::REQUEST_SET_CONFIGURATION)
+            .set_value(config_value as u16)
+            .set_index(0)
+            .set_length(0);
+        self.control_out(endpoint_id, setup_data, None, 0, None)
+    }
+
     fn control_in(
         &mut self,
         endpoint_id: EndpointId,
         setup_data: SetupData,
         buf: Option<*const ()>,
         len: u32,
-        class_driver: Option<ClassDriver>,
+        issuer: Option<ClassDriver>,
     ) -> Result<()> {
-        if let Some(driver) = class_driver {
+        if let Some(driver) = issuer {
             self.event_waiters.insert(setup_data, driver);
         }
 
@@ -270,7 +321,7 @@ impl UsbDevice {
         }
 
         let dci = endpoint_id.address() as usize;
-        let tr = if let Some(ring) = &mut self.transfer_rings[dci] {
+        let tr = if let Some(ring) = &mut self.transfer_rings[dci - 1] {
             ring
         } else {
             return Err(Error::TransferRingNotSet);
@@ -298,6 +349,65 @@ impl UsbDevice {
                 let status_trb_ptr = tr.push(
                     StatusStageTrb::new()
                         .set_direction(true)
+                        .set_interrupt_on_completion(true)
+                        .data(),
+                );
+                self.setup_stage_map
+                    .insert(status_trb_ptr, setup_stage_ptr as *const SetupStageTrb);
+            }
+        }
+
+        self.dbreg.update(|reg| {
+            reg.set_doorbell_target(dci as u8);
+            reg.set_doorbell_stream_id(0);
+        });
+        Ok(())
+    }
+
+    fn control_out(
+        &mut self,
+        endpoint_id: EndpointId,
+        setup_data: SetupData,
+        buf: Option<*const ()>,
+        len: u32,
+        issuer: Option<ClassDriver>,
+    ) -> Result<()> {
+        if let Some(driver) = issuer {
+            self.event_waiters.insert(setup_data, driver);
+        }
+
+        if 15 < endpoint_id.number() {
+            return Err(Error::InvalidEndpointNumber);
+        }
+
+        let dci = endpoint_id.address() as usize;
+        let tr = if let Some(ring) = &mut self.transfer_rings[dci - 1] {
+            ring
+        } else {
+            return Err(Error::TransferRingNotSet);
+        };
+
+        match buf {
+            Some(buf) => {
+                let setup_stage_ptr = tr.push(
+                    SetupStageTrb::from(&setup_data, SetupStageTrb::TRANSFER_TYPE_OUT_DATA_STAGE)
+                        .data(),
+                );
+                let data = DataStageTrb::from(buf, len, true).set_interrupt_on_completion(true);
+
+                let data_stage_ptr = tr.push(data.data());
+                tr.push(StatusStageTrb::new().data());
+
+                self.setup_stage_map
+                    .insert(data_stage_ptr, setup_stage_ptr as *const SetupStageTrb);
+            }
+            None => {
+                let setup_stage_ptr = tr.push(
+                    SetupStageTrb::from(&setup_data, SetupStageTrb::TRANSFER_TYPE_NO_DATA_STAGE)
+                        .data(),
+                );
+                let status_trb_ptr = tr.push(
+                    StatusStageTrb::new()
                         .set_interrupt_on_completion(true)
                         .data(),
                 );
