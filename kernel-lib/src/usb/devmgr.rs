@@ -5,8 +5,8 @@ use crate::usb::descriptor::{
 use crate::usb::endpoint::{EndpointConfig, EndpointId};
 use crate::usb::mem::allocate;
 use crate::usb::ring::{
-    DataStageTrb, RequestType, Ring, SetupData, SetupStageTrb, StatusStageTrb, TransferEventTrb,
-    Trb, TrbType,
+    DataStageTrb, NormalTrb, RequestType, Ring, SetupData, SetupStageTrb, StatusStageTrb,
+    TransferEventTrb, Trb, TrbType,
 };
 use crate::usb::IdentityMapper;
 use crate::util::{ArrayMap, ArrayVec};
@@ -357,10 +357,7 @@ impl UsbDevice {
             }
         }
 
-        self.dbreg.update(|reg| {
-            reg.set_doorbell_target(dci as u8);
-            reg.set_doorbell_stream_id(0);
-        });
+        self.ring_doorbell(dci);
         Ok(())
     }
 
@@ -416,10 +413,38 @@ impl UsbDevice {
             }
         }
 
+        self.ring_doorbell(dci);
+        Ok(())
+    }
+
+    fn interrupt_in(
+        &mut self,
+        endpoint_id: EndpointId,
+        buf: *const (),
+        len: u32,
+    ) -> Result<()> {
+        let dci = endpoint_id.address() as usize;
+        let tr = if let Some(ring) = &mut self.transfer_rings[dci - 1] {
+            ring
+        } else {
+            return Err(Error::TransferRingNotSet);
+        };
+
+        let normal_trb = NormalTrb::new()
+            .set_pointer(&buf)
+            .set_transfer_length(len)
+            .set_interrupt_on_short_packet(true)
+            .set_interrupt_on_completion(true);
+
+        tr.push(normal_trb.data());
+        self.ring_doorbell(dci);
+        Ok(())
+    }
+
+    fn ring_doorbell(&mut self, dci: usize) {
         self.dbreg.update(|reg| {
             reg.set_doorbell_target(dci as u8);
             reg.set_doorbell_stream_id(0);
         });
-        Ok(())
     }
 }

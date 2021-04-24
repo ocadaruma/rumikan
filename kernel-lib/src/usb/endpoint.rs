@@ -45,6 +45,20 @@ pub struct EndpointConfig {
 
 impl EndpointConfig {
     pub fn from(desc: &EndpointDescriptor) -> Self {
-        todo!()
+        Self {
+            endpoint_id: EndpointId::from(
+                desc.endpoint_address_number() as u32,
+                desc.endpoint_address_dir_in(),
+            ),
+            endpoint_type: match desc.attributes_transfer_type() {
+                0 => EndpointType::Control,
+                1 => EndpointType::Isochronous,
+                2 => EndpointType::Bulk,
+                3 => EndpointType::Interrupt,
+                _ => panic!("never"),
+            },
+            max_packet_size: desc.max_packet_size() as usize,
+            interval: desc.interval() as u32,
+        }
     }
 }

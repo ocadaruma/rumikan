@@ -1,6 +1,8 @@
 use crate::usb::descriptor::InterfaceDescriptor;
 use crate::usb::endpoint::{EndpointConfig, EndpointId};
+use crate::usb::mem::allocate;
 use crate::usb::ring::SetupData;
+use core::mem::size_of;
 
 #[derive(Debug)]
 pub enum Error {
@@ -16,7 +18,17 @@ pub enum ClassDriver {
 
 impl ClassDriver {
     pub fn new(desc: &InterfaceDescriptor) -> Option<Self> {
-        todo!()
+        if desc.interface_class() == 3 && desc.interface_sub_class() == 1 {
+            if desc.interface_protocol() == 1 {
+                return None;
+            } else if desc.interface_protocol() == 2 {
+                let driver_ptr: *mut HidMouseDriver =
+                    allocate(size_of::<HidMouseDriver>(), None, None)
+                        .expect("Failed to allocate memory for driver");
+                return Some(ClassDriver::HidMouse(driver_ptr));
+            }
+        }
+        None
     }
 
     pub fn on_interrupt_completed(
@@ -30,7 +42,7 @@ impl ClassDriver {
                 unsafe { driver.read() }.on_interrupt_completed(ep_id, buf, len)
             }
         }
-        unimplemented!()
+        Ok(())
     }
 
     pub fn on_control_completed(
@@ -48,12 +60,17 @@ impl ClassDriver {
     }
 }
 
+#[derive(Debug)]
 pub struct HidMouseDriver {
     num_observers: usize,
+    interface_index: u8,
 }
 
 impl HidMouseDriver {
     pub fn on_interrupt_completed(&self, ep_id: EndpointId, buf: *const (), len: u32) {
-        unimplemented!()
+        if ep_id.is_in() {
+            printk!("event received\n");
+        }
+        todo!()
     }
 }

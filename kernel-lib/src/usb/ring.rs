@@ -134,12 +134,43 @@ pub struct NormalTrb(u128);
 impl NormalTrb {
     pub const TYPE: u8 = 1;
 
+    pub fn new() -> Self {
+        let mut bits = 0u128;
+        bits.set_bits(106..112, Self::TYPE as u128);
+
+        Self(bits)
+    }
+
     pub fn transfer_length(&self) -> u32 {
         self.0.get_bits(64..81) as u32
     }
 
+    pub fn set_transfer_length(mut self, l: u32) -> Self {
+        self.0.set_bits(64..81, l as u128);
+        self
+    }
+
     pub fn pointer(&self) -> *const () {
         unsafe { transmute(self.0.get_bits(0..64) as u64) }
+    }
+
+    pub fn set_pointer(mut self, ptr: &*const ()) -> Self {
+        self.0.set_bits(0..64, *ptr as u128);
+        self
+    }
+
+    pub fn set_interrupt_on_short_packet(mut self, b: bool) -> Self {
+        self.0.set_bit(98, b);
+        self
+    }
+
+    pub fn set_interrupt_on_completion(mut self, b: bool) -> Self {
+        self.0.set_bit(101, b);
+        self
+    }
+
+    pub fn data(&self) -> u128 {
+        self.0
     }
 }
 
