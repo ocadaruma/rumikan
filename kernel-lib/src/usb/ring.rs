@@ -156,7 +156,7 @@ impl SetupStageTrb {
         let mut bits = 0u128;
         bits.set_bits(106..112, Self::TYPE as u128);
 
-        bits.set_bits(64..17, 8); // transfer_length
+        bits.set_bits(64..81, 8); // transfer_length
         bits.set_bit(102, true); // immediate_data
         bits.set_bits(112..114, transfer_type as u128);
 
