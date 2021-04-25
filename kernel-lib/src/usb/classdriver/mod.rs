@@ -52,11 +52,12 @@ impl ClassDriver {
         buf: *const (),
         len: u32,
     ) -> Result<()> {
-        unimplemented!()
+        // todo!()
+        Ok(())
     }
 
     pub fn set_endpoint(&mut self, config: &EndpointConfig) {
-        unimplemented!()
+        // todo!()
     }
 }
 
@@ -69,8 +70,12 @@ pub struct HidMouseDriver {
 impl HidMouseDriver {
     pub fn on_interrupt_completed(&self, ep_id: EndpointId, buf: *const (), len: u32) {
         if ep_id.is_in() {
-            printk!("event received\n");
+            let (x, y) = unsafe {
+                let ptr = buf as *const u8;
+                (ptr.add(1).read(), ptr.add(2).read())
+            };
+            printk!("event received. (x, y) = ({}, {})\n", x, y);
         }
-        todo!()
+        // todo!()
     }
 }

@@ -417,12 +417,7 @@ impl UsbDevice {
         Ok(())
     }
 
-    fn interrupt_in(
-        &mut self,
-        endpoint_id: EndpointId,
-        buf: *const (),
-        len: u32,
-    ) -> Result<()> {
+    fn interrupt_in(&mut self, endpoint_id: EndpointId, buf: *const (), len: u32) -> Result<()> {
         let dci = endpoint_id.address() as usize;
         let tr = if let Some(ring) = &mut self.transfer_rings[dci - 1] {
             ring

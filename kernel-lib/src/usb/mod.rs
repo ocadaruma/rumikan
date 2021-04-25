@@ -35,6 +35,7 @@ pub enum Error {
     InvalidPhase,
     NotImplemented,
     InvalidSlotId,
+    DeviceError(devmgr::Error),
 }
 
 pub type Result<T> = core::result::Result<T, Error>;
@@ -133,7 +134,9 @@ impl Xhc {
 
     fn on_transfer_event(&mut self, trb: TransferEventTrb) -> Result<()> {
         let slot_id = trb.slot_id();
-        if let Some(dev) = self.device_manager.find_by_slot(slot_id) {
+        if let Some(mut dev) = self.device_manager.find_by_slot(slot_id) {
+            unsafe { dev.read() }.on_transfer_event_received(&trb).map_err(Error::DeviceError)?;
+
         } else {
             return Err(Error::InvalidSlotId);
         }
