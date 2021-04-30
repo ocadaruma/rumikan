@@ -140,7 +140,9 @@ impl Xhc {
             dev.on_transfer_event_received(&trb)
                 .map_err(Error::DeviceError)?;
             let port_num = dev.device_context().slot_ref().root_hub_port_number();
-            if dev.is_initialized() && self.port_config_phase[port_num as usize] == ConfigPhase::InitializingDevice {
+            if dev.is_initialized()
+                && self.port_config_phase[port_num as usize] == ConfigPhase::InitializingDevice
+            {
                 self.configure_endpoint(&mut dev)
             } else {
                 Ok(())
