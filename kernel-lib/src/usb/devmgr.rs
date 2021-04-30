@@ -12,7 +12,7 @@ use crate::usb::IdentityMapper;
 use crate::util::{ArrayMap, ArrayVec};
 use core::mem::size_of;
 use core::ptr::{null, null_mut};
-use xhci::context::byte32::Device as DeviceContext;
+use xhci::context::byte32::{Device as DeviceContext, Input as InputContext};
 
 #[derive(Debug)]
 pub enum Error {
@@ -96,12 +96,22 @@ pub struct UsbDevice {
     ep_configs: ArrayVec<EndpointConfig, 16>,
     setup_stage_map: ArrayMap<*const Trb, *const SetupStageTrb, 16>,
     event_waiters: ArrayMap<SetupData, ClassDriver, 4>,
+    device_context: *mut DeviceContext,
+    input_context: *mut InputContext,
     is_initialized: bool,
     initialize_phase: u8,
 }
 
 impl UsbDevice {
     const DATA_BUF_LEN: u32 = 256;
+
+    pub fn device_context(&self) -> &DeviceContext {
+        unsafe { self.device_context.as_ref().unwrap() }
+    }
+
+    pub fn is_initialized(&self) -> bool {
+        self.is_initialized
+    }
 
     pub fn on_transfer_event_received(&mut self, trb: &TransferEventTrb) -> Result<()> {
         let residual_length = trb.transfer_length();

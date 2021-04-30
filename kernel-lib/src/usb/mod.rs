@@ -6,7 +6,7 @@ mod mem;
 mod port;
 mod ring;
 
-use crate::usb::devmgr::DeviceManager;
+use crate::usb::devmgr::{DeviceManager, UsbDevice};
 use crate::usb::mem::allocate;
 use crate::usb::port::Port;
 use crate::usb::ring::{
@@ -15,6 +15,7 @@ use crate::usb::ring::{
 };
 use core::num::NonZeroUsize;
 use xhci::accessor::Mapper;
+use xhci::context::DeviceHandler;
 use xhci::{ExtendedCapability, Registers};
 
 #[derive(Copy, Clone, Debug)]
@@ -135,12 +136,18 @@ impl Xhc {
     fn on_transfer_event(&mut self, trb: TransferEventTrb) -> Result<()> {
         let slot_id = trb.slot_id();
         if let Some(mut dev) = self.device_manager.find_by_slot(slot_id) {
-            unsafe { dev.read() }.on_transfer_event_received(&trb).map_err(Error::DeviceError)?;
-
+            let mut dev = unsafe { dev.read() };
+            dev.on_transfer_event_received(&trb)
+                .map_err(Error::DeviceError)?;
+            let port_num = dev.device_context().slot_ref().root_hub_port_number();
+            if dev.is_initialized() && self.port_config_phase[port_num as usize] == ConfigPhase::InitializingDevice {
+                self.configure_endpoint(&mut dev)
+            } else {
+                Ok(())
+            }
         } else {
             return Err(Error::InvalidSlotId);
         }
-        unimplemented!()
     }
 
     fn on_command_completion_event(&mut self, trb: CommandCompletionEventTrb) -> Result<()> {
@@ -159,6 +166,10 @@ impl Xhc {
             }
             _ => Err(Error::InvalidPhase),
         }
+    }
+
+    fn configure_endpoint(&mut self, dev: &mut UsbDevice) -> Result<()> {
+        unimplemented!()
     }
 
     fn enable_slot(&mut self, port: &mut Port) {
