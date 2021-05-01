@@ -8,12 +8,13 @@ mod port;
 mod ring;
 
 use crate::usb::devmgr::{DeviceManager, UsbDevice};
-use crate::usb::endpoint::EndpointId;
+use crate::usb::endpoint::{EndpointId, EndpointNumber};
 use crate::usb::mem::allocate;
 use crate::usb::port::{Port, PortSpeed};
 use crate::usb::ring::{
-    CommandCompletionEventTrb, ConfigureEndpointCommandTrb, EnableSlotCommandTrb, EventRing,
-    PortStatusChangeEventTrb, Ring, TransferEventTrb, Trb, TrbType,
+    AddressDeviceCommandTrb, CommandCompletionEventTrb, ConfigureEndpointCommandTrb,
+    EnableSlotCommandTrb, EventRing, PortStatusChangeEventTrb, Ring, TransferEventTrb, Trb,
+    TrbType,
 };
 use core::num::NonZeroUsize;
 use xhci::accessor::Mapper;
@@ -148,7 +149,7 @@ impl Xhc {
     }
 
     fn on_transfer_event(&mut self, trb: TransferEventTrb) -> Result<()> {
-        let slot_id = SlotId::new(trb.slot_id());
+        let slot_id = trb.slot_id();
 
         let dev = self
             .device_manager
@@ -168,7 +169,83 @@ impl Xhc {
     }
 
     fn on_command_completion_event(&mut self, trb: CommandCompletionEventTrb) -> Result<()> {
-        unimplemented!()
+        match unsafe { *trb.trb_pointer() }.specialize() {
+            TrbType::EnableSlotCommand(_) => {
+                if let Some(addressing_port) = self.addressing_port {
+                    if self.port_config_phase[addressing_port as usize] == ConfigPhase::EnablingSlot
+                    {
+                        return self.address_device(addressing_port, trb.slot_id());
+                    }
+                }
+            }
+            TrbType::AddressDeviceCommand(_) => {
+                let port_id = {
+                    let dev = self
+                        .device_manager
+                        .find_by_slot(trb.slot_id())
+                        .ok_or(Error::InvalidSlotId)?;
+                    dev.device_context().slot_context.root_hub_port_num()
+                };
+
+                if self.addressing_port == Some(port_id)
+                    && self.port_config_phase[port_id as usize] == ConfigPhase::AddressingDevice
+                {
+                    for i in 0..self.port_config_phase.len() {
+                        if self.port_config_phase[i] == ConfigPhase::WaitingAddressed {
+                            let mut port = self.port_at(i as u8);
+                            self.reset_port(&mut port)?;
+                            break;
+                        }
+                    }
+
+                    self.port_config_phase[port_id as usize] = ConfigPhase::InitializingDevice;
+                    return self
+                        .device_manager
+                        .find_by_slot(trb.slot_id())
+                        .expect("Existence is guaranteed here")
+                        .start_initialize()
+                        .map_err(Error::DeviceError);
+                }
+            }
+            TrbType::ConfigureEndpointCommand(_) => {
+                let dev = self
+                    .device_manager
+                    .find_by_slot(trb.slot_id())
+                    .ok_or(Error::InvalidSlotId)?;
+                let port_id = dev.device_context().slot_context.root_hub_port_num();
+                if self.port_config_phase[port_id as usize] == ConfigPhase::ConfiguringEndpoints {
+                    self.port_config_phase[port_id as usize] = ConfigPhase::Configured;
+                    return dev.on_endpoints_configured().map_err(Error::DeviceError);
+                }
+            }
+            _ => {}
+        }
+        Err(Error::InvalidPhase)
+    }
+
+    fn address_device(&mut self, port_id: u8, slot_id: SlotId) -> Result<()> {
+        let port = self.port_at(port_id);
+        let dbreg = self.registers.doorbell.single_at(slot_id.value() as usize);
+        self.device_manager
+            .allocate_device(slot_id, dbreg)
+            .map_err(Error::DeviceError)?;
+
+        let dev = self
+            .device_manager
+            .find_by_slot(slot_id)
+            .expect("Existence is guaranteed here");
+        dev.address_device(port);
+
+        self.port_config_phase[port_id as usize] = ConfigPhase::AddressingDevice;
+        let cmd = AddressDeviceCommandTrb::new(slot_id, dev.input_context_ptr());
+
+        self.command_ring.push(cmd.data());
+        self.registers.doorbell.update_at(0, |d| {
+            d.set_doorbell_target(0);
+            d.set_doorbell_stream_id(0);
+        });
+
+        Ok(())
     }
 
     fn on_port_status_change_event(&mut self, trb: PortStatusChangeEventTrb) -> Result<()> {

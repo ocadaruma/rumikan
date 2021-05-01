@@ -4,7 +4,7 @@ use crate::usb::descriptor::{
     ConfigurationDescriptor, Descriptor, DescriptorType, DeviceDescriptor,
 };
 use crate::usb::endpoint::{EndpointConfig, EndpointId, EndpointNumber, EndpointType};
-use crate::usb::mem::allocate;
+use crate::usb::mem::{allocate, allocate_array};
 use crate::usb::port::{Port, PortSpeed};
 use crate::usb::ring::{
     DataStageTrb, NormalTrb, RequestType, Ring, SetupData, SetupStageTrb, StatusStageTrb,
@@ -27,6 +27,7 @@ pub enum Error {
     InvalidEndpointNumber,
     TransferRingNotSet,
     UnknownXHCISpeedID,
+    ArrayMapError(crate::util::ArrayMapError),
 }
 
 pub type Result<T> = core::result::Result<T, Error>;
@@ -39,6 +40,8 @@ pub struct DeviceManager {
     device_contexts: *mut *mut DeviceContext,
     devices: ArrayMap<SlotId, UsbDevice, DEVICES_CAPACITY>,
 }
+
+type DoorbellRegister = xhci::accessor::Single<xhci::registers::doorbell::Register, IdentityMapper>;
 
 impl DeviceManager {
     pub fn new() -> DeviceManager {
@@ -71,6 +74,39 @@ impl DeviceManager {
         Ok(())
     }
 
+    pub fn allocate_device(&mut self, slot_id: SlotId, dbreg: DoorbellRegister) -> Result<()> {
+        let device_context =
+            allocate_array::<DeviceContext>(1, Some(64), Some(4096)).map_err(Error::AllocError)?;
+        let input_context =
+            allocate_array::<InputContext>(1, Some(64), Some(4096)).map_err(Error::AllocError)?;
+        let data_buf = allocate::<()>(256, None, None).map_err(Error::AllocError)?;
+
+        let dev = UsbDevice {
+            class_drivers: ArrayMap::new(),
+            transfer_rings: ArrayMap::new(),
+            dbreg,
+            data_buf,
+            ep_configs: ArrayVec::new(),
+            setup_stage_map: ArrayMap::new(),
+            event_waiters: ArrayMap::new(),
+            device_context,
+            input_context,
+            is_initialized: false,
+            initialize_phase: 0,
+        };
+
+        unsafe {
+            self.device_contexts
+                .add(slot_id.value() as usize)
+                .write(device_context);
+        }
+
+        self.devices
+            .insert(slot_id, dev)
+            .map_err(Error::ArrayMapError)
+            .map(|_| ())
+    }
+
     pub fn find_by_slot(&mut self, slot_id: SlotId) -> Option<&mut UsbDevice> {
         self.devices.get_mut(&slot_id)
     }
@@ -80,7 +116,7 @@ impl DeviceManager {
 pub struct UsbDevice {
     class_drivers: ArrayMap<EndpointNumber, ClassDriver, { EndpointNumber::MAX as usize }>,
     transfer_rings: ArrayMap<EndpointId, Ring, { EndpointId::MAX as usize }>,
-    dbreg: xhci::accessor::Single<xhci::registers::doorbell::Register, IdentityMapper>,
+    dbreg: DoorbellRegister,
     data_buf: *const (),
     ep_configs: ArrayVec<EndpointConfig, { EndpointNumber::MAX as usize }>,
     setup_stage_map: ArrayMap<*const Trb, *const SetupStageTrb, 16>,
@@ -104,6 +140,44 @@ impl UsbDevice {
 
     pub fn is_initialized(&self) -> bool {
         self.is_initialized
+    }
+
+    pub fn start_initialize(&mut self) -> Result<()> {
+        self.is_initialized = false;
+        self.initialize_phase = 1;
+        self.get_descriptor(
+            EndpointId::DEFAULT_CONTROL_PIPE_ID,
+            DeviceDescriptor::TYPE,
+            0,
+            Some(self.data_buf),
+            Self::DATA_BUF_LEN,
+        )
+    }
+
+    pub fn address_device(&mut self, port: Port) {
+        let ep0 = EndpointId::from(EndpointNumber::new(0), false);
+        let tr_ptr = self.alloc_transfer_ring(ep0, 32).ptr_as_u64();
+        let slot_ctx = unsafe { self.input_context.as_mut().unwrap() }.enable_slot_context();
+        let ep0_ctx = unsafe { self.input_context.as_mut().unwrap() }.enable_endpoint(ep0);
+
+        slot_ctx.set_route_string(0);
+        slot_ctx.set_root_hub_port_num(port.port_num());
+        slot_ctx.set_context_entries(1);
+        slot_ctx.set_speed(port.port_speed().unwrap());
+
+        ep0_ctx.set_endpoint_type(4); // Control Endpoint. Bidi
+        ep0_ctx.set_max_packet_size(match slot_ctx.speed() {
+            Ok(PortSpeed::SuperSpeed) => 512,
+            Ok(PortSpeed::HighSpeed) => 64,
+            _ => 8,
+        });
+        ep0_ctx.set_max_burst_size(0);
+        ep0_ctx.set_transfer_ring_buffer(tr_ptr);
+        ep0_ctx.set_dequeue_cycle_state(true);
+        ep0_ctx.set_interval(0);
+        ep0_ctx.set_max_primary_streams(0);
+        ep0_ctx.set_mult(0);
+        ep0_ctx.set_error_count(3);
     }
 
     pub fn configure_endpoints(&mut self, port: Port) -> Result<()> {
@@ -143,9 +217,9 @@ impl UsbDevice {
                 port_speed.convert_interval(ep_config.endpoint_type, ep_config.interval) as u8,
             );
             ep_ctx.set_average_trb_length(1);
-            let tr = self.init_transfer_ring(ep_config.endpoint_id, 32);
+            let tr = self.alloc_transfer_ring(ep_config.endpoint_id, 32);
 
-            ep_ctx.set_tr_dequeue_pointer(tr.ptr_as_u64());
+            ep_ctx.set_transfer_ring_buffer(tr.ptr_as_u64());
             ep_ctx.set_dequeue_cycle_state(true);
             ep_ctx.set_max_primary_streams(0);
             ep_ctx.set_mult(0);
@@ -192,6 +266,10 @@ impl UsbDevice {
             }
             _ => Err(Error::NotImplemented),
         }
+    }
+
+    pub fn on_endpoints_configured(&mut self) -> Result<()> {
+        unimplemented!()
     }
 
     fn on_interrupt_completed(
@@ -491,7 +569,7 @@ impl UsbDevice {
         });
     }
 
-    fn init_transfer_ring(&mut self, endpoint_id: EndpointId, buf_size: usize) -> &mut Ring {
+    fn alloc_transfer_ring(&mut self, endpoint_id: EndpointId, buf_size: usize) -> &mut Ring {
         let mut ring = Ring::new();
         ring.initialize(buf_size);
 

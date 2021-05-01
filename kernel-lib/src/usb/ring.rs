@@ -31,6 +31,13 @@ impl Trb {
             CommandCompletionEventTrb::TYPE => {
                 TrbType::CommandCompletionEvent(CommandCompletionEventTrb(self.0))
             }
+            EnableSlotCommandTrb::TYPE => TrbType::EnableSlotCommand(EnableSlotCommandTrb(self.0)),
+            AddressDeviceCommandTrb::TYPE => {
+                TrbType::AddressDeviceCommand(AddressDeviceCommandTrb(self.0))
+            }
+            ConfigureEndpointCommandTrb::TYPE => {
+                TrbType::ConfigureEndpointCommand(ConfigureEndpointCommandTrb(self.0))
+            }
             PortStatusChangeEventTrb::TYPE => {
                 TrbType::PortStatusChangeEvent(PortStatusChangeEventTrb(self.0))
             }
@@ -47,8 +54,8 @@ pub struct TransferEventTrb(u128);
 impl TransferEventTrb {
     pub const TYPE: u8 = 32;
 
-    pub fn slot_id(&self) -> u8 {
-        self.0.get_bits(120..128) as u8
+    pub fn slot_id(&self) -> SlotId {
+        SlotId::new(self.0.get_bits(120..128) as u8)
     }
 
     pub fn transfer_length(&self) -> u32 {
@@ -73,6 +80,14 @@ impl TransferEventTrb {
 pub struct CommandCompletionEventTrb(u128);
 impl CommandCompletionEventTrb {
     pub const TYPE: u8 = 33;
+
+    pub fn trb_pointer(&self) -> *const Trb {
+        unsafe { transmute((self.0.get_bits(4..64) << 4) as u64) }
+    }
+
+    pub fn slot_id(&self) -> SlotId {
+        SlotId::new(self.0.get_bits(120..128) as u8)
+    }
 }
 
 #[derive(Debug)]
@@ -111,6 +126,25 @@ impl Default for EnableSlotCommandTrb {
 
 #[derive(Debug)]
 #[repr(transparent)]
+pub struct AddressDeviceCommandTrb(u128);
+impl AddressDeviceCommandTrb {
+    pub const TYPE: u8 = 11;
+
+    pub fn new(slot_id: SlotId, input_context_ptr: u64) -> Self {
+        let mut bits = 0u128;
+        bits.set_bits(106..112, Self::TYPE as u128);
+        bits.set_bits(4..64, (input_context_ptr >> 4) as u128);
+        bits.set_bits(120..128, slot_id.value() as u128);
+        Self(bits)
+    }
+
+    pub fn data(&self) -> u128 {
+        self.0
+    }
+}
+
+#[derive(Debug)]
+#[repr(transparent)]
 pub struct ConfigureEndpointCommandTrb(u128);
 impl ConfigureEndpointCommandTrb {
     pub const TYPE: u8 = 12;
@@ -118,7 +152,7 @@ impl ConfigureEndpointCommandTrb {
     pub fn new(slot_id: SlotId, input_context_ptr: u64) -> Self {
         let mut bits = 0u128;
         bits.set_bits(106..112, Self::TYPE as u128);
-        bits.set_bits(4..64, input_context_ptr as u128);
+        bits.set_bits(4..64, (input_context_ptr >> 4) as u128);
         bits.set_bits(120..128, slot_id.value() as u128);
         Self(bits)
     }
@@ -137,7 +171,7 @@ impl LinkTrb {
     pub fn new(ring_segment_pointer: u64) -> Self {
         let mut bits = 0u128;
         bits.set_bits(106..112, Self::TYPE as u128);
-        bits.set_bits(4..64, ring_segment_pointer as u128);
+        bits.set_bits(4..64, (ring_segment_pointer >> 4) as u128);
 
         Self(bits)
     }
@@ -410,6 +444,9 @@ pub enum TrbType {
     Normal(NormalTrb),
     TransferEvent(TransferEventTrb),
     CommandCompletionEvent(CommandCompletionEventTrb),
+    ConfigureEndpointCommand(ConfigureEndpointCommandTrb),
+    EnableSlotCommand(EnableSlotCommandTrb),
+    AddressDeviceCommand(AddressDeviceCommandTrb),
     PortStatusChangeEvent(PortStatusChangeEventTrb),
     DataStage(DataStageTrb),
     StatusStage(StatusStageTrb),

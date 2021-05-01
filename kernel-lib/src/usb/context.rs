@@ -1,5 +1,7 @@
 use crate::usb::endpoint::EndpointId;
+use crate::usb::port::PortSpeed;
 use bit_field::BitField;
+use core::convert::TryFrom;
 
 #[repr(transparent)]
 #[derive(Debug, Default, Copy, Clone)]
@@ -7,6 +9,22 @@ pub struct SlotContext([u32; 8]);
 impl SlotContext {
     pub fn root_hub_port_num(&self) -> u8 {
         self.0[1].get_bits(16..24) as u8
+    }
+
+    pub fn set_root_hub_port_num(&mut self, num: u8) {
+        self.0[1].set_bits(16..24, num as u32);
+    }
+
+    pub fn set_route_string(&mut self, s: u32) {
+        self.0[0].set_bits(0..20, s as u32);
+    }
+
+    pub fn speed(&self) -> Result<PortSpeed, ()> {
+        PortSpeed::try_from(self.0[0].get_bits(20..24) as u8)
+    }
+
+    pub fn set_speed(&mut self, s: PortSpeed) {
+        self.0[0].set_bits(20..24, s as u32);
     }
 
     pub fn set_context_entries(&mut self, entries: u8) {
@@ -30,6 +48,10 @@ impl EndpointContext {
 
     pub fn set_max_packet_size(&mut self, s: u16) {
         self.bits1.set_bits(16..32, s as u32);
+    }
+
+    pub fn set_max_burst_size(&mut self, s: u8) {
+        self.bits1.set_bits(8..16, s as u32);
     }
 
     pub fn set_interval(&mut self, i: u8) {
@@ -56,8 +78,8 @@ impl EndpointContext {
         self.bits1.set_bits(1..3, s as u32);
     }
 
-    pub fn set_tr_dequeue_pointer(&mut self, ptr: u64) {
-        self.bits2.set_bits(4..64, ptr);
+    pub fn set_transfer_ring_buffer(&mut self, ptr: u64) {
+        self.bits2.set_bits(4..64, ptr >> 4);
     }
 }
 

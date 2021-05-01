@@ -9,8 +9,8 @@ use xhci::registers::PortRegisterSet;
 pub enum PortSpeed {
     FullSpeed = PortSpeed::FULL_SPEED,
     LowSpeed = PortSpeed::LOW_SPEED,
-    _HighSpeed = PortSpeed::HIGH_SPEED,
-    _SuperSpeed = PortSpeed::SUPER_SPEED,
+    HighSpeed = PortSpeed::HIGH_SPEED,
+    SuperSpeed = PortSpeed::SUPER_SPEED,
     _SuperSpeedPlus = PortSpeed::SUPER_SPEED_PLUS,
 }
 
@@ -54,8 +54,8 @@ impl TryFrom<u8> for PortSpeed {
         match value {
             PortSpeed::FULL_SPEED => Ok(PortSpeed::FullSpeed),
             PortSpeed::LOW_SPEED => Ok(PortSpeed::LowSpeed),
-            PortSpeed::HIGH_SPEED => Ok(PortSpeed::_HighSpeed),
-            PortSpeed::SUPER_SPEED => Ok(PortSpeed::_SuperSpeed),
+            PortSpeed::HIGH_SPEED => Ok(PortSpeed::HighSpeed),
+            PortSpeed::SUPER_SPEED => Ok(PortSpeed::SuperSpeed),
             PortSpeed::SUPER_SPEED_PLUS => Ok(PortSpeed::_SuperSpeedPlus),
             _ => Err(()),
         }
