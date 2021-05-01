@@ -180,7 +180,7 @@ pub type CharVec = ArrayVec<char, 256>;
 impl fmt::Write for CharVec {
     fn write_str(&mut self, s: &str) -> fmt::Result {
         for c in s.chars() {
-            if self.add(c).is_err() {
+            if self.push(c).is_err() {
                 return fmt::Result::Err(fmt::Error);
             }
         }
@@ -204,7 +204,7 @@ mod tests {
     fn char_vec_write_partial() {
         let mut v = CharVec::new();
         for _ in 0..255 {
-            v.add('A').unwrap();
+            v.push('A').unwrap();
         }
         assert!(v.write_str("BCCCCCCC").is_err());
         // must be written partially even if failed to write entire string

@@ -1,4 +1,5 @@
 use core::mem::MaybeUninit;
+use core::ops::{Index, IndexMut};
 
 /// Fixed-sized array-backed vector.
 #[derive(Debug)]
@@ -27,7 +28,7 @@ impl<T, const N: usize> ArrayVec<T, N> {
         }
     }
 
-    pub fn add(&mut self, value: T) -> Result<()> {
+    pub fn push(&mut self, value: T) -> Result<()> {
         if self.len < N {
             self.buf[self.len] = value;
             self.len += 1;
@@ -47,6 +48,20 @@ impl<T, const N: usize> ArrayVec<T, N> {
 
     pub fn as_mut_slice(&mut self) -> &mut [T] {
         &mut self.buf[..self.len]
+    }
+}
+
+impl<T, const N: usize> Index<usize> for ArrayVec<T, N> {
+    type Output = T;
+
+    fn index(&self, index: usize) -> &Self::Output {
+        &self.buf[index]
+    }
+}
+
+impl<T, const N: usize> IndexMut<usize> for ArrayVec<T, N> {
+    fn index_mut(&mut self, index: usize) -> &mut Self::Output {
+        &mut self.buf[index]
     }
 }
 
@@ -136,7 +151,7 @@ mod tests {
     #[test]
     fn array_vec_add() {
         let mut v = ArrayVec::<u32, 16>::new();
-        v.add(42).unwrap();
+        v.push(42).unwrap();
         assert_eq!(v.as_slice(), &[42]);
     }
 
@@ -144,10 +159,10 @@ mod tests {
     fn array_vec_full() {
         let mut v = ArrayVec::<u32, 16>::new();
         for _ in 0..15 {
-            v.add(42).unwrap();
+            v.push(42).unwrap();
         }
-        assert!(v.add(43).is_ok());
-        assert!(v.add(44).is_err());
+        assert!(v.push(43).is_ok());
+        assert!(v.push(44).is_err());
     }
 
     #[test]

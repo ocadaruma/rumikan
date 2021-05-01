@@ -1,7 +1,7 @@
 use crate::usb::endpoint::EndpointId;
 use crate::usb::mem::allocate_array;
 use crate::usb::ring::TrbType::Unsupported;
-use crate::usb::IdentityMapper;
+use crate::usb::{IdentityMapper, SlotId};
 use bit_field::BitField;
 use core::mem::transmute;
 use xhci::accessor;
@@ -106,6 +106,25 @@ impl EnableSlotCommandTrb {
 impl Default for EnableSlotCommandTrb {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[derive(Debug)]
+#[repr(transparent)]
+pub struct ConfigureEndpointCommandTrb(u128);
+impl ConfigureEndpointCommandTrb {
+    pub const TYPE: u8 = 12;
+
+    pub fn new(slot_id: SlotId, input_context_ptr: u64) -> Self {
+        let mut bits = 0u128;
+        bits.set_bits(106..112, Self::TYPE as u128);
+        bits.set_bits(4..64, input_context_ptr as u128);
+        bits.set_bits(120..128, slot_id.value() as u128);
+        Self(bits)
+    }
+
+    pub fn data(&self) -> u128 {
+        self.0
     }
 }
 

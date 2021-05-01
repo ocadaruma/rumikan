@@ -80,7 +80,7 @@ impl Pci {
         let header_type = Self::read_header_type(bus, device, function);
         if self
             .devices
-            .add(Device {
+            .push(Device {
                 bus,
                 device,
                 function,

@@ -1,4 +1,5 @@
 mod classdriver;
+mod context;
 mod descriptor;
 mod devmgr;
 mod endpoint;
@@ -7,11 +8,12 @@ mod port;
 mod ring;
 
 use crate::usb::devmgr::{DeviceManager, UsbDevice};
+use crate::usb::endpoint::EndpointId;
 use crate::usb::mem::allocate;
-use crate::usb::port::Port;
+use crate::usb::port::{Port, PortSpeed};
 use crate::usb::ring::{
-    CommandCompletionEventTrb, EnableSlotCommandTrb, EventRing, PortStatusChangeEventTrb, Ring,
-    TransferEventTrb, Trb, TrbType,
+    CommandCompletionEventTrb, ConfigureEndpointCommandTrb, EnableSlotCommandTrb, EventRing,
+    PortStatusChangeEventTrb, Ring, TransferEventTrb, Trb, TrbType,
 };
 use core::num::NonZeroUsize;
 use xhci::accessor::Mapper;
@@ -23,6 +25,10 @@ pub struct SlotId(u8);
 impl SlotId {
     pub fn new(value: u8) -> Self {
         Self(value)
+    }
+
+    pub fn value(&self) -> u8 {
+        self.0
     }
 }
 
@@ -143,19 +149,21 @@ impl Xhc {
 
     fn on_transfer_event(&mut self, trb: TransferEventTrb) -> Result<()> {
         let slot_id = SlotId::new(trb.slot_id());
-        if let Some(dev) = self.device_manager.find_by_slot(slot_id) {
-            dev.on_transfer_event_received(&trb)
-                .map_err(Error::DeviceError)?;
-            let port_num = dev.device_context().slot_ref().root_hub_port_number();
-            if dev.is_initialized()
-                && self.port_config_phase[port_num as usize] == ConfigPhase::InitializingDevice
-            {
-                self.configure_endpoint(slot_id)
-            } else {
-                Ok(())
-            }
+
+        let dev = self
+            .device_manager
+            .find_by_slot(slot_id)
+            .ok_or(Error::InvalidSlotId)?;
+        dev.on_transfer_event_received(&trb)
+            .map_err(Error::DeviceError)?;
+
+        let port_id = dev.device_context().slot_context.root_hub_port_num();
+        if dev.is_initialized()
+            && self.port_config_phase[port_id as usize] == ConfigPhase::InitializingDevice
+        {
+            self.configure_endpoints(slot_id, port_id)
         } else {
-            return Err(Error::InvalidSlotId);
+            Ok(())
         }
     }
 
@@ -177,8 +185,25 @@ impl Xhc {
         }
     }
 
-    fn configure_endpoint(&mut self, slot_id: SlotId) -> Result<()> {
-        unimplemented!()
+    fn configure_endpoints(&mut self, slot_id: SlotId, port_id: u8) -> Result<()> {
+        let port = self.port_at(port_id);
+        let dev = self
+            .device_manager
+            .find_by_slot(slot_id)
+            .expect("Device existence is guaranteed here");
+        let input_context_ptr = dev.input_context_ptr();
+        dev.configure_endpoints(port).map_err(Error::DeviceError)?;
+
+        self.port_config_phase[port_id as usize] = ConfigPhase::ConfiguringEndpoints;
+        let cmd = ConfigureEndpointCommandTrb::new(slot_id, input_context_ptr);
+
+        self.command_ring.push(cmd.data());
+        self.registers.doorbell.update_at(0, |d| {
+            d.set_doorbell_target(0);
+            d.set_doorbell_stream_id(0);
+        });
+
+        Ok(())
     }
 
     fn enable_slot(&mut self, port: &mut Port) {

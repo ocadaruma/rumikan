@@ -1,9 +1,11 @@
 use crate::usb::classdriver::ClassDriver;
+use crate::usb::context::{DeviceContext, InputContext, SlotContext};
 use crate::usb::descriptor::{
     ConfigurationDescriptor, Descriptor, DescriptorType, DeviceDescriptor,
 };
-use crate::usb::endpoint::{EndpointConfig, EndpointId, EndpointNumber};
+use crate::usb::endpoint::{EndpointConfig, EndpointId, EndpointNumber, EndpointType};
 use crate::usb::mem::allocate;
+use crate::usb::port::{Port, PortSpeed};
 use crate::usb::ring::{
     DataStageTrb, NormalTrb, RequestType, Ring, SetupData, SetupStageTrb, StatusStageTrb,
     TransferEventTrb, Trb, TrbType,
@@ -12,7 +14,6 @@ use crate::usb::{IdentityMapper, SlotId};
 use crate::util::{ArrayMap, ArrayVec};
 use core::mem::size_of;
 use core::ptr::{null, null_mut};
-use xhci::context::byte32::{Device as DeviceContext, Input as InputContext};
 
 #[derive(Debug)]
 pub enum Error {
@@ -25,6 +26,7 @@ pub enum Error {
     InvalidPhase,
     InvalidEndpointNumber,
     TransferRingNotSet,
+    UnknownXHCISpeedID,
 }
 
 pub type Result<T> = core::result::Result<T, Error>;
@@ -96,8 +98,60 @@ impl UsbDevice {
         unsafe { self.device_context.as_ref().unwrap() }
     }
 
+    pub fn input_context_ptr(&self) -> u64 {
+        self.input_context as u64
+    }
+
     pub fn is_initialized(&self) -> bool {
         self.is_initialized
+    }
+
+    pub fn configure_endpoints(&mut self, port: Port) -> Result<()> {
+        let slot_ctx = unsafe {
+            self.input_context.as_mut().unwrap().slot_context =
+                self.device_context.as_ref().unwrap().slot_context;
+            self.input_context.as_mut().unwrap().enable_slot_context()
+        };
+
+        slot_ctx.set_context_entries(EndpointId::MAX);
+        let port_speed = port.port_speed().ok_or(Error::UnknownXHCISpeedID)?;
+
+        for i in 0..self.ep_configs.len() {
+            let mut ep_config = self.ep_configs[i];
+
+            let ep_ctx = unsafe {
+                self.input_context
+                    .as_mut()
+                    .unwrap()
+                    .enable_endpoint(ep_config.endpoint_id)
+            };
+            match ep_config.endpoint_type {
+                EndpointType::Control => ep_ctx.set_endpoint_type(4),
+                EndpointType::Isochronous => {
+                    ep_ctx.set_endpoint_type(if ep_config.endpoint_id.is_in() { 5 } else { 1 })
+                }
+                EndpointType::Bulk => {
+                    ep_ctx.set_endpoint_type(if ep_config.endpoint_id.is_in() { 6 } else { 2 })
+                }
+                EndpointType::Interrupt => {
+                    ep_ctx.set_endpoint_type(if ep_config.endpoint_id.is_in() { 7 } else { 3 })
+                }
+            }
+
+            ep_ctx.set_max_packet_size(ep_config.max_packet_size as u16);
+            ep_ctx.set_interval(
+                port_speed.convert_interval(ep_config.endpoint_type, ep_config.interval) as u8,
+            );
+            ep_ctx.set_average_trb_length(1);
+            let tr = self.init_transfer_ring(ep_config.endpoint_id, 32);
+
+            ep_ctx.set_tr_dequeue_pointer(tr.ptr_as_u64());
+            ep_ctx.set_dequeue_cycle_state(true);
+            ep_ctx.set_max_primary_streams(0);
+            ep_ctx.set_mult(0);
+            ep_ctx.set_error_count(3);
+        }
+        Ok(())
     }
 
     pub fn on_transfer_event_received(&mut self, trb: &TransferEventTrb) -> Result<()> {
@@ -231,7 +285,7 @@ impl UsbDevice {
                                 let conf = EndpointConfig::from(&ep_desc);
                                 self.class_drivers
                                     .insert(conf.endpoint_id.number(), class_driver);
-                                self.ep_configs.add(conf);
+                                self.ep_configs.push(conf);
                             }
                             Some(DescriptorType::Hid(_)) => {
                                 // noop
@@ -435,5 +489,15 @@ impl UsbDevice {
             reg.set_doorbell_target(endpoint_id.address());
             reg.set_doorbell_stream_id(0);
         });
+    }
+
+    fn init_transfer_ring(&mut self, endpoint_id: EndpointId, buf_size: usize) -> &mut Ring {
+        let mut ring = Ring::new();
+        ring.initialize(buf_size);
+
+        self.transfer_rings.insert(endpoint_id, ring);
+        self.transfer_rings
+            .get_mut(&endpoint_id)
+            .expect("Existence is guaranteed here")
     }
 }
