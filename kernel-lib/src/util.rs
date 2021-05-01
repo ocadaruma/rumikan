@@ -106,6 +106,17 @@ where
         None
     }
 
+    pub fn get_mut(&mut self, key: &K) -> Option<&mut V> {
+        for elem in self.buf.iter_mut() {
+            if let Some((k, v)) = elem {
+                if k == key {
+                    return Some(v);
+                }
+            }
+        }
+        None
+    }
+
     pub fn remove(&mut self, key: &K) -> Option<V> {
         for elem in self.buf.iter_mut() {
             if let Some((k, v)) = elem.take() {

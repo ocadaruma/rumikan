@@ -64,7 +64,7 @@ impl TransferEventTrb {
     }
 
     pub fn endpoint_id(&self) -> EndpointId {
-        EndpointId::new(self.0.get_bits(112..117) as u32)
+        EndpointId::new(self.0.get_bits(112..117) as u8)
     }
 }
 

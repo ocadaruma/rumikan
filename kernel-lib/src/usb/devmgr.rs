@@ -2,13 +2,13 @@ use crate::usb::classdriver::ClassDriver;
 use crate::usb::descriptor::{
     ConfigurationDescriptor, Descriptor, DescriptorType, DeviceDescriptor,
 };
-use crate::usb::endpoint::{EndpointConfig, EndpointId};
+use crate::usb::endpoint::{EndpointConfig, EndpointId, EndpointNumber};
 use crate::usb::mem::allocate;
 use crate::usb::ring::{
     DataStageTrb, NormalTrb, RequestType, Ring, SetupData, SetupStageTrb, StatusStageTrb,
     TransferEventTrb, Trb, TrbType,
 };
-use crate::usb::IdentityMapper;
+use crate::usb::{IdentityMapper, SlotId};
 use crate::util::{ArrayMap, ArrayVec};
 use core::mem::size_of;
 use core::ptr::{null, null_mut};
@@ -30,19 +30,20 @@ pub enum Error {
 pub type Result<T> = core::result::Result<T, Error>;
 
 const NUM_DEVICE_SLOTS: usize = 8;
+const DEVICES_CAPACITY: usize = NUM_DEVICE_SLOTS + 1;
 
 pub struct DeviceManager {
     max_slots: usize,
-    device_context_ptr: *mut DeviceContext,
-    devices: *mut UsbDevice,
+    device_contexts: *mut *mut DeviceContext,
+    devices: ArrayMap<SlotId, UsbDevice, DEVICES_CAPACITY>,
 }
 
 impl DeviceManager {
     pub fn new() -> DeviceManager {
         DeviceManager {
             max_slots: NUM_DEVICE_SLOTS,
-            device_context_ptr: null_mut(),
-            devices: null_mut(),
+            device_contexts: null_mut(),
+            devices: ArrayMap::new(),
         }
     }
 
@@ -51,49 +52,35 @@ impl DeviceManager {
     }
 
     pub fn dcbaa_ptr(&self) -> u64 {
-        self.device_context_ptr as u64
+        self.device_contexts as u64
     }
 
     pub fn initialize(&mut self) -> Result<()> {
-        let devices_ptr = match allocate::<UsbDevice>(
-            size_of::<UsbDevice>() * (self.max_slots + 1),
-            None,
-            None,
-        ) {
-            Ok(ptr) => ptr,
-            Err(err) => return Err(Error::AllocError(err)),
-        };
-
-        let ctx_ptr = match allocate::<DeviceContext>(
-            size_of::<DeviceContext>() * (self.max_slots + 1),
+        let ctx_ptr = match allocate::<*mut DeviceContext>(
+            size_of::<*mut DeviceContext>() * (self.max_slots + 1),
             Some(64),
             Some(4096),
         ) {
             Ok(ptr) => ptr,
             Err(err) => return Err(Error::AllocError(err)),
         };
-        self.devices = devices_ptr;
-        self.device_context_ptr = ctx_ptr;
+        self.device_contexts = ctx_ptr;
 
         Ok(())
     }
 
-    pub fn find_by_slot(&self, slot_id: u8) -> Option<*mut UsbDevice> {
-        if slot_id as usize > self.max_slots {
-            None
-        } else {
-            Some(unsafe { self.devices.add(slot_id as usize) })
-        }
+    pub fn find_by_slot(&mut self, slot_id: SlotId) -> Option<&mut UsbDevice> {
+        self.devices.get_mut(&slot_id)
     }
 }
 
 #[derive(Debug)]
 pub struct UsbDevice {
-    class_drivers: [Option<ClassDriver>; 16],
-    transfer_rings: [Option<Ring>; 31],
+    class_drivers: ArrayMap<EndpointNumber, ClassDriver, { EndpointNumber::MAX as usize }>,
+    transfer_rings: ArrayMap<EndpointId, Ring, { EndpointId::MAX as usize }>,
     dbreg: xhci::accessor::Single<xhci::registers::doorbell::Register, IdentityMapper>,
     data_buf: *const (),
-    ep_configs: ArrayVec<EndpointConfig, 16>,
+    ep_configs: ArrayVec<EndpointConfig, { EndpointNumber::MAX as usize }>,
     setup_stage_map: ArrayMap<*const Trb, *const SetupStageTrb, 16>,
     event_waiters: ArrayMap<SetupData, ClassDriver, 4>,
     device_context: *mut DeviceContext,
@@ -159,7 +146,7 @@ impl UsbDevice {
         buf: *const (),
         len: u32,
     ) -> Result<()> {
-        if let Some(driver) = self.class_drivers[endpoint_id.number() as usize] {
+        if let Some(driver) = self.class_drivers.get(&endpoint_id.number()) {
             return driver
                 .on_interrupt_completed(endpoint_id, buf, len)
                 .map_err(Error::ClassDriverError);
@@ -242,8 +229,8 @@ impl UsbDevice {
                         match iter.next() {
                             Some(DescriptorType::Endpoint(ep_desc)) => {
                                 let conf = EndpointConfig::from(&ep_desc);
-                                self.class_drivers[conf.endpoint_id.number() as usize] =
-                                    Some(class_driver);
+                                self.class_drivers
+                                    .insert(conf.endpoint_id.number(), class_driver);
                                 self.ep_configs.add(conf);
                             }
                             Some(DescriptorType::Hid(_)) => {
@@ -268,7 +255,7 @@ impl UsbDevice {
 
     fn initialize_phase3(&mut self) -> Result<()> {
         for &config in self.ep_configs.as_slice() {
-            if let Some(mut driver) = self.class_drivers[config.endpoint_id.number() as usize] {
+            if let Some(driver) = self.class_drivers.get_mut(&config.endpoint_id.number()) {
                 driver.set_endpoint(&config);
             }
         }
@@ -326,12 +313,11 @@ impl UsbDevice {
             self.event_waiters.insert(setup_data, driver);
         }
 
-        if 15 < endpoint_id.number() {
+        if EndpointNumber::MAX_ENDPOINT < endpoint_id.number() {
             return Err(Error::InvalidEndpointNumber);
         }
 
-        let dci = endpoint_id.address() as usize;
-        let tr = if let Some(ring) = &mut self.transfer_rings[dci - 1] {
+        let tr = if let Some(ring) = self.transfer_rings.get_mut(&endpoint_id) {
             ring
         } else {
             return Err(Error::TransferRingNotSet);
@@ -367,7 +353,7 @@ impl UsbDevice {
             }
         }
 
-        self.ring_doorbell(dci);
+        self.ring_doorbell(endpoint_id);
         Ok(())
     }
 
@@ -383,12 +369,11 @@ impl UsbDevice {
             self.event_waiters.insert(setup_data, driver);
         }
 
-        if 15 < endpoint_id.number() {
+        if EndpointNumber::MAX_ENDPOINT < endpoint_id.number() {
             return Err(Error::InvalidEndpointNumber);
         }
 
-        let dci = endpoint_id.address() as usize;
-        let tr = if let Some(ring) = &mut self.transfer_rings[dci - 1] {
+        let tr = if let Some(ring) = self.transfer_rings.get_mut(&endpoint_id) {
             ring
         } else {
             return Err(Error::TransferRingNotSet);
@@ -423,13 +408,12 @@ impl UsbDevice {
             }
         }
 
-        self.ring_doorbell(dci);
+        self.ring_doorbell(endpoint_id);
         Ok(())
     }
 
     fn interrupt_in(&mut self, endpoint_id: EndpointId, buf: *const (), len: u32) -> Result<()> {
-        let dci = endpoint_id.address() as usize;
-        let tr = if let Some(ring) = &mut self.transfer_rings[dci - 1] {
+        let tr = if let Some(ring) = self.transfer_rings.get_mut(&endpoint_id) {
             ring
         } else {
             return Err(Error::TransferRingNotSet);
@@ -442,13 +426,13 @@ impl UsbDevice {
             .set_interrupt_on_completion(true);
 
         tr.push(normal_trb.data());
-        self.ring_doorbell(dci);
+        self.ring_doorbell(endpoint_id);
         Ok(())
     }
 
-    fn ring_doorbell(&mut self, dci: usize) {
+    fn ring_doorbell(&mut self, endpoint_id: EndpointId) {
         self.dbreg.update(|reg| {
-            reg.set_doorbell_target(dci as u8);
+            reg.set_doorbell_target(endpoint_id.address());
             reg.set_doorbell_stream_id(0);
         });
     }

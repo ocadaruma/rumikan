@@ -18,6 +18,14 @@ use xhci::accessor::Mapper;
 use xhci::context::DeviceHandler;
 use xhci::{ExtendedCapability, Registers};
 
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub struct SlotId(u8);
+impl SlotId {
+    pub fn new(value: u8) -> Self {
+        Self(value)
+    }
+}
+
 #[derive(Copy, Clone, Debug)]
 pub struct IdentityMapper;
 
@@ -134,16 +142,15 @@ impl Xhc {
     }
 
     fn on_transfer_event(&mut self, trb: TransferEventTrb) -> Result<()> {
-        let slot_id = trb.slot_id();
-        if let Some(mut dev) = self.device_manager.find_by_slot(slot_id) {
-            let mut dev = unsafe { dev.read() };
+        let slot_id = SlotId::new(trb.slot_id());
+        if let Some(dev) = self.device_manager.find_by_slot(slot_id) {
             dev.on_transfer_event_received(&trb)
                 .map_err(Error::DeviceError)?;
             let port_num = dev.device_context().slot_ref().root_hub_port_number();
             if dev.is_initialized()
                 && self.port_config_phase[port_num as usize] == ConfigPhase::InitializingDevice
             {
-                self.configure_endpoint(&mut dev)
+                self.configure_endpoint(slot_id)
             } else {
                 Ok(())
             }
@@ -170,7 +177,7 @@ impl Xhc {
         }
     }
 
-    fn configure_endpoint(&mut self, dev: &mut UsbDevice) -> Result<()> {
+    fn configure_endpoint(&mut self, slot_id: SlotId) -> Result<()> {
         unimplemented!()
     }
 
