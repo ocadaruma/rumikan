@@ -575,20 +575,15 @@ impl EventRing {
         self.cycle_bit = true;
         self.len = len;
 
-        let buffer_ptr = match allocate_array::<Trb>(len, Some(64), Some(64 * 1024)) {
-            Ok(ptr) => ptr,
-            Err(err) => return Err(Error::AllocError(err)),
-        };
+        let buffer_ptr = allocate_array::<Trb>(len, Some(64), Some(64 * 1024))
+            .map_err(Error::AllocError)?;
 
-        let segment_table_ptr =
-            match allocate_array::<EventRingSegmentTableEntry>(1, Some(64), Some(64 * 1024)) {
-                Ok(ptr) => ptr,
-                Err(err) => return Err(Error::AllocError(err)),
-            };
+        let segment_table_ptr = allocate_array::<EventRingSegmentTableEntry>(1, Some(64), Some(64 * 1024))
+            .map_err(Error::AllocError)?;
 
         unsafe {
-            (*segment_table_ptr).set_ring_segment_size(len as u16);
-            (*segment_table_ptr).set_ring_segment_base_address(buffer_ptr as u64);
+            segment_table_ptr.read().set_ring_segment_size(len as u16);
+            segment_table_ptr.read().set_ring_segment_base_address(buffer_ptr as u64);
         }
 
         interrupter.update(|i| {
@@ -604,7 +599,7 @@ impl EventRing {
     pub fn peek_front(&self) -> Option<Trb> {
         let ptr: *const Trb =
             unsafe { transmute(self.interrupter.read().erdp.event_ring_dequeue_pointer()) };
-        let trb = unsafe { *ptr };
+        let trb = unsafe { ptr.read() };
 
         if trb.cycle_bit() == self.cycle_bit {
             Some(trb)

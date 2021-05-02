@@ -100,6 +100,14 @@ mod tests {
     }
 
     #[test]
+    fn test_base_alignment() {
+        free_all();
+
+        let ptr = allocate::<()>(1, None, None).unwrap() as u64;
+        assert_eq!(ptr % 64, 0);
+    }
+
+    #[test]
     fn allocate_alignment() {
         free_all();
 

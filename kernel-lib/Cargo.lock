@@ -105,14 +105,14 @@ dependencies = [
 
 [[package]]
 name = "unicode-xid"
-version = "0.2.1"
+version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f7fe0bb3479651439c9112f72b6c505038574c9fbb575ed1bf3b797fa39dd564"
+checksum = "8ccb82d61f80a663efe1f787a51b16b5a51e3314d6ac365b08639f52387b33f3"
 
 [[package]]
 name = "xhci"
 version = "0.5.2"
-source = "git+https://github.com/ocadaruma/xhci.git?branch=rumikan#62a6d7fde7ada650d10263a7d97b832e63e0b830"
+source = "git+https://github.com/ocadaruma/xhci.git?branch=rumikan#0f412d67933c853796e07a661a8f342d6f6e7a8b"
 dependencies = [
  "accessor",
  "bit_field",

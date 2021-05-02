@@ -146,6 +146,7 @@ impl Xhc {
 
     fn on_transfer_event(&mut self, trb: TransferEventTrb) -> Result<()> {
         let slot_id = trb.slot_id();
+        debug!("TransferEvent: slot_id = {}", slot_id.value());
 
         let dev = self
             .device_manager
@@ -165,6 +166,8 @@ impl Xhc {
     }
 
     fn on_command_completion_event(&mut self, trb: CommandCompletionEventTrb) -> Result<()> {
+        debug!("CommandCompletionEvent: slot_id = {}", trb.slot_id().value());
+
         match unsafe { *trb.trb_pointer() }.specialize() {
             TrbType::EnableSlotCommand(_) => {
                 if let Some(addressing_port) = self.addressing_port {
@@ -246,6 +249,8 @@ impl Xhc {
 
     fn on_port_status_change_event(&mut self, trb: PortStatusChangeEventTrb) -> Result<()> {
         let port_id = trb.port_id();
+        debug!("PortStatusChangeEvent: port_id = {}", port_id);
+
         let mut port = self.port_at(port_id);
 
         match self.port_config_phase[port_id as usize] {

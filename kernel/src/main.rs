@@ -23,7 +23,7 @@ pub extern "C" fn _start(frame_buffer_info: FrameBufferInfo) -> ! {
         PixelColor::new(0xff, 0xff, 0xff),
     );
     init_global_console(console);
-    init_logger(LogLevel::Info);
+    init_logger(LogLevel::Debug);
 
     info!("Hello, world!");
     frame_buffer.write_mouse_cursor(
@@ -35,12 +35,12 @@ pub extern "C" fn _start(frame_buffer_info: FrameBufferInfo) -> ! {
 
     let mut pci = Pci::new();
     if pci.scan_all_bus().is_err() {
-        warn!("Failed to scan PCI bus");
+        error!("Failed to scan PCI bus");
     }
 
     for &dev in pci.devices() {
         let vendor_id = dev.read_vendor_id();
-        debug!(
+        trace!(
             "{}.{}.{}: vend 0x{:04x}, head 0x{:-2x}",
             dev.bus,
             dev.device,
@@ -66,14 +66,14 @@ pub extern "C" fn _start(frame_buffer_info: FrameBufferInfo) -> ! {
         }
     }
     if let Some(dev) = xhc_dev {
-        debug!(
+        trace!(
             "xHC has been found: {}.{}.{}",
             dev.bus,
             dev.device,
             dev.function
         );
         let xhc_mmio_base = dev.read_bar(0).unwrap() & !0xfusize;
-        debug!("xHC mmio_base = 0x{:08x}", xhc_mmio_base);
+        trace!("xHC mmio_base = 0x{:08x}", xhc_mmio_base);
         dev.switch_ehci2xhci_if_necessary(&pci);
 
         let mut xhc = Xhc::new(xhc_mmio_base);
@@ -82,7 +82,7 @@ pub extern "C" fn _start(frame_buffer_info: FrameBufferInfo) -> ! {
 
         for i in 1..=xhc.max_ports() {
             let mut port = xhc.port_at(i);
-            debug!(
+            trace!(
                 "Port {} is_connected={}",
                 port.port_num(),
                 port.is_connected()
@@ -90,8 +90,14 @@ pub extern "C" fn _start(frame_buffer_info: FrameBufferInfo) -> ! {
 
             if port.is_connected() {
                 if let Err(err) = xhc.configure_port(&mut port) {
-                    warn!("Failed to configure {} due to {:?}", port.port_num(), err);
+                    error!("Failed to configure {} due to {:?}", port.port_num(), err);
                 }
+            }
+        }
+
+        loop {
+            if let Err(err) = xhc.process_event() {
+                error!("Error while process event: {:?}", err);
             }
         }
     }
