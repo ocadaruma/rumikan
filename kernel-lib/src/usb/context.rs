@@ -116,7 +116,7 @@ impl InputContext {
     }
 
     pub fn enable_endpoint(&mut self, dci: EndpointId) -> &mut EndpointContext {
-        self.input_control_context.add_context_flags |= (1 << dci.address());
+        self.input_control_context.add_context_flags |= 1 << dci.address();
         &mut self.endpoint_contexts[dci.address() as usize - 1]
     }
 }

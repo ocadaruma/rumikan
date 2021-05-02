@@ -1,6 +1,5 @@
 use bit_field::BitField;
 use core::mem::transmute;
-use core::slice::from_raw_parts;
 
 #[derive(Debug)]
 pub struct Descriptor(*const u8);

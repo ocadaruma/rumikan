@@ -203,10 +203,6 @@ impl NormalTrb {
         self
     }
 
-    pub fn pointer(&self) -> *const () {
-        unsafe { transmute(self.0.get_bits(0..64) as u64) }
-    }
-
     pub fn set_pointer(mut self, ptr: &*const ()) -> Self {
         self.0.set_bits(0..64, *ptr as u128);
         self

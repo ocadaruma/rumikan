@@ -2,7 +2,6 @@ use crate::usb::descriptor::InterfaceDescriptor;
 use crate::usb::endpoint::{EndpointConfig, EndpointId, EndpointType};
 use crate::usb::mem::allocate;
 use core::mem::size_of;
-use core::ptr::null;
 
 #[derive(Debug)]
 pub enum Error {
@@ -91,7 +90,7 @@ impl HidMouseDriver {
         }
     }
 
-    pub fn on_interrupt_completed(&self, ep_id: EndpointId, len: u32) {
+    pub fn on_interrupt_completed(&self, ep_id: EndpointId, _len: u32) {
         if ep_id.is_in() {
             let (x, y) = unsafe {
                 let ptr = self.buf as *const u8;

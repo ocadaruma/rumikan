@@ -1,5 +1,5 @@
 use crate::usb::classdriver::ClassDriver;
-use crate::usb::context::{DeviceContext, InputContext, SlotContext};
+use crate::usb::context::{DeviceContext, InputContext};
 use crate::usb::descriptor::{
     ConfigurationDescriptor, Descriptor, DescriptorType, DeviceDescriptor,
 };
@@ -28,6 +28,8 @@ pub enum Error {
     TransferRingNotSet,
     UnknownXHCISpeedID,
     ArrayMapError(crate::util::ArrayMapError),
+    ArrayVecError(crate::util::ArrayVecError),
+    TrbError(crate::usb::ring::Error),
 }
 
 pub type Result<T> = core::result::Result<T, Error>;
@@ -154,9 +156,9 @@ impl UsbDevice {
         )
     }
 
-    pub fn address_device(&mut self, port: Port) {
+    pub fn address_device(&mut self, port: Port) -> Result<()> {
         let ep0 = EndpointId::from(EndpointNumber::new(0), false);
-        let tr_ptr = self.alloc_transfer_ring(ep0, 32).ptr_as_u64();
+        let tr_ptr = self.alloc_transfer_ring(ep0, 32)?.ptr_as_u64();
         let slot_ctx = unsafe { self.input_context.as_mut().unwrap() }.enable_slot_context();
         let ep0_ctx = unsafe { self.input_context.as_mut().unwrap() }.enable_endpoint(ep0);
 
@@ -178,6 +180,8 @@ impl UsbDevice {
         ep0_ctx.set_max_primary_streams(0);
         ep0_ctx.set_mult(0);
         ep0_ctx.set_error_count(3);
+
+        Ok(())
     }
 
     pub fn configure_endpoints(&mut self, port: Port) -> Result<()> {
@@ -217,7 +221,7 @@ impl UsbDevice {
                 port_speed.convert_interval(ep_config.endpoint_type, ep_config.interval) as u8,
             );
             ep_ctx.set_average_trb_length(1);
-            let tr = self.alloc_transfer_ring(ep_config.endpoint_id, 32);
+            let tr = self.alloc_transfer_ring(ep_config.endpoint_id, 32)?;
 
             ep_ctx.set_transfer_ring_buffer(tr.ptr_as_u64());
             ep_ctx.set_dequeue_cycle_state(true);
@@ -294,6 +298,7 @@ impl UsbDevice {
     fn on_interrupt_completed(&mut self, endpoint_id: EndpointId, len: u32) -> Result<()> {
         if let Some(driver) = self.class_drivers.get(&endpoint_id.number()) {
             if endpoint_id.is_in() {
+                let driver = *driver;
                 driver
                     .on_interrupt_completed(endpoint_id, len)
                     .map_err(Error::ClassDriverError)?;
@@ -318,7 +323,7 @@ impl UsbDevice {
     ) -> Result<()> {
         if self.is_initialized {
             if let Some(waiter) = self.event_waiters.get_mut(&setup_data) {
-                let mut waiter = *waiter;
+                let waiter = *waiter;
                 return self.interrupt_in(
                     waiter.endpoint_interrupt_in(),
                     waiter.buffer(),
@@ -330,11 +335,10 @@ impl UsbDevice {
         match self.initialize_phase {
             1 => {
                 if setup_data.request() == SetupData::REQUEST_GET_DESCRIPTOR {
-                    if let DescriptorType::Device(ptr) =
+                    if let DescriptorType::Device(_) =
                         Descriptor::new(buf as *const u8).specialize()
                     {
-                        self.initialize_phase1();
-                        return Ok(());
+                        return self.initialize_phase1();
                     }
                 }
                 Err(Error::InvalidPhase)
@@ -387,8 +391,9 @@ impl UsbDevice {
                             Some(DescriptorType::Endpoint(ep_desc)) => {
                                 let conf = EndpointConfig::from(&ep_desc);
                                 self.class_drivers
-                                    .insert(conf.endpoint_id.number(), class_driver);
-                                self.ep_configs.push(conf);
+                                    .insert(conf.endpoint_id.number(), class_driver)
+                                    .map_err(Error::ArrayMapError)?;
+                                self.ep_configs.push(conf).map_err(Error::ArrayVecError)?;
                             }
                             Some(DescriptorType::Hid(_)) => {
                                 // noop
@@ -411,6 +416,14 @@ impl UsbDevice {
     }
 
     fn initialize_phase3(&mut self) -> Result<()> {
+        for i in 0..self.ep_configs.len() {
+            let config = self.ep_configs[i];
+            let driver = self
+                .class_drivers
+                .get_mut(&config.endpoint_id.number())
+                .unwrap();
+            driver.set_endpoint(&config);
+        }
         self.initialize_phase = 4;
         self.is_initialized = true;
         Ok(())
@@ -462,7 +475,9 @@ impl UsbDevice {
         issuer: Option<ClassDriver>,
     ) -> Result<()> {
         if let Some(driver) = issuer {
-            self.event_waiters.insert(setup_data, driver);
+            self.event_waiters
+                .insert(setup_data, driver)
+                .map_err(Error::ArrayMapError)?;
         }
 
         if EndpointNumber::MAX_ENDPOINT < endpoint_id.number() {
@@ -487,7 +502,8 @@ impl UsbDevice {
                 tr.push(StatusStageTrb::new().data());
 
                 self.setup_stage_map
-                    .insert(data_stage_ptr, setup_stage_ptr as *const SetupStageTrb);
+                    .insert(data_stage_ptr, setup_stage_ptr as *const SetupStageTrb)
+                    .map_err(Error::ArrayMapError)?;
             }
             None => {
                 let setup_stage_ptr = tr.push(
@@ -501,7 +517,8 @@ impl UsbDevice {
                         .data(),
                 );
                 self.setup_stage_map
-                    .insert(status_trb_ptr, setup_stage_ptr as *const SetupStageTrb);
+                    .insert(status_trb_ptr, setup_stage_ptr as *const SetupStageTrb)
+                    .map_err(Error::ArrayMapError)?;
             }
         }
 
@@ -518,7 +535,9 @@ impl UsbDevice {
         issuer: Option<ClassDriver>,
     ) -> Result<()> {
         if let Some(driver) = issuer {
-            self.event_waiters.insert(setup_data, driver);
+            self.event_waiters
+                .insert(setup_data, driver)
+                .map_err(Error::ArrayMapError)?;
         }
 
         if EndpointNumber::MAX_ENDPOINT < endpoint_id.number() {
@@ -543,7 +562,8 @@ impl UsbDevice {
                 tr.push(StatusStageTrb::new().data());
 
                 self.setup_stage_map
-                    .insert(data_stage_ptr, setup_stage_ptr as *const SetupStageTrb);
+                    .insert(data_stage_ptr, setup_stage_ptr as *const SetupStageTrb)
+                    .map_err(Error::ArrayMapError)?;
             }
             None => {
                 let setup_stage_ptr = tr.push(
@@ -556,7 +576,8 @@ impl UsbDevice {
                         .data(),
                 );
                 self.setup_stage_map
-                    .insert(status_trb_ptr, setup_stage_ptr as *const SetupStageTrb);
+                    .insert(status_trb_ptr, setup_stage_ptr as *const SetupStageTrb)
+                    .map_err(Error::ArrayMapError)?;
             }
         }
 
@@ -589,13 +610,20 @@ impl UsbDevice {
         });
     }
 
-    fn alloc_transfer_ring(&mut self, endpoint_id: EndpointId, buf_size: usize) -> &mut Ring {
+    fn alloc_transfer_ring(
+        &mut self,
+        endpoint_id: EndpointId,
+        buf_size: usize,
+    ) -> Result<&mut Ring> {
         let mut ring = Ring::new();
-        ring.initialize(buf_size);
+        ring.initialize(buf_size).map_err(Error::TrbError)?;
 
-        self.transfer_rings.insert(endpoint_id, ring);
         self.transfer_rings
+            .insert(endpoint_id, ring)
+            .map_err(Error::ArrayMapError)?;
+        Ok(self
+            .transfer_rings
             .get_mut(&endpoint_id)
-            .expect("Existence is guaranteed here")
+            .expect("Existence is guaranteed here"))
     }
 }

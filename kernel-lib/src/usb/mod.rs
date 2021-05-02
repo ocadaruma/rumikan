@@ -7,18 +7,14 @@ mod mem;
 mod port;
 mod ring;
 
-use crate::usb::devmgr::{DeviceManager, UsbDevice};
-use crate::usb::endpoint::{EndpointId, EndpointNumber};
-use crate::usb::mem::allocate;
-use crate::usb::port::{Port, PortSpeed};
+use crate::usb::devmgr::DeviceManager;
+use crate::usb::port::Port;
 use crate::usb::ring::{
     AddressDeviceCommandTrb, CommandCompletionEventTrb, ConfigureEndpointCommandTrb,
-    EnableSlotCommandTrb, EventRing, PortStatusChangeEventTrb, Ring, TransferEventTrb, Trb,
-    TrbType,
+    EnableSlotCommandTrb, EventRing, PortStatusChangeEventTrb, Ring, TransferEventTrb, TrbType,
 };
 use core::num::NonZeroUsize;
 use xhci::accessor::Mapper;
-use xhci::context::DeviceHandler;
 use xhci::{ExtendedCapability, Registers};
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
@@ -234,7 +230,7 @@ impl Xhc {
             .device_manager
             .find_by_slot(slot_id)
             .expect("Existence is guaranteed here");
-        dev.address_device(port);
+        dev.address_device(port).map_err(Error::DeviceError)?;
 
         self.port_config_phase[port_id as usize] = ConfigPhase::AddressingDevice;
         let cmd = AddressDeviceCommandTrb::new(slot_id, dev.input_context_ptr());

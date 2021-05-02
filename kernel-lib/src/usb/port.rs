@@ -108,6 +108,7 @@ impl Port {
     }
 }
 
+#[cfg(test)]
 mod tests {
     use crate::usb::port::msb1;
 
