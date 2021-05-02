@@ -24,6 +24,14 @@ impl ClassDriver {
                 let driver_ptr: *mut HidMouseDriver =
                     allocate(size_of::<HidMouseDriver>(), None, None)
                         .expect("Failed to allocate memory for driver");
+                unsafe {
+                    driver_ptr.write(HidMouseDriver {
+                        num_observers: 0,
+                        interface_index: desc.interface_number(),
+                        endpoint_interrupt_in: EndpointId::new(0),
+                        buf: allocate(1024, None, None).expect("Failed to allocate memory for driver"),
+                    });
+                }
                 return Some(ClassDriver::HidMouse(driver_ptr));
             }
         }
@@ -74,7 +82,6 @@ impl ClassDriver {
 pub struct HidMouseDriver {
     num_observers: usize,
     interface_index: u8,
-    initialize_phase: u8,
     endpoint_interrupt_in: EndpointId,
     buf: *const (),
 }
