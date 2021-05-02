@@ -239,7 +239,6 @@ impl UsbDevice {
             let transfer_length = normal_trb.transfer_length() - residual_length;
             return self.on_interrupt_completed(
                 trb.endpoint_id(),
-                normal_trb.pointer(),
                 transfer_length,
             );
         }
@@ -255,14 +254,13 @@ impl UsbDevice {
             TrbType::DataStage(data_stage_trb) => {
                 let transfer_length = data_stage_trb.trb_transfer_length() - residual_length;
                 self.on_control_completed(
-                    trb.endpoint_id(),
                     setup_data,
                     data_stage_trb.data_buffer_pointer(),
                     transfer_length,
                 )
             }
             TrbType::StatusStage(_) => {
-                self.on_control_completed(trb.endpoint_id(), setup_data, null(), 0)
+                self.on_control_completed(setup_data, null(), 0)
             }
             _ => Err(Error::NotImplemented),
         }
@@ -286,7 +284,6 @@ impl UsbDevice {
                 .set_value(0)
                 .set_index(driver.interface_index() as u16)
                 .set_length(0);
-            driver.on_endpoints_configured();
             let driver = *driver;
             self.control_out(
                 EndpointId::DEFAULT_CONTROL_PIPE_ID,
@@ -300,15 +297,22 @@ impl UsbDevice {
     }
 
     fn on_interrupt_completed(
-        &self,
+        &mut self,
         endpoint_id: EndpointId,
-        buf: *const (),
         len: u32,
     ) -> Result<()> {
         if let Some(driver) = self.class_drivers.get(&endpoint_id.number()) {
-            return driver
-                .on_interrupt_completed(endpoint_id, buf, len)
-                .map_err(Error::ClassDriverError);
+            if endpoint_id.is_in() {
+                driver
+                    .on_interrupt_completed(endpoint_id, len)
+                    .map_err(Error::ClassDriverError)?;
+                self.interrupt_in(
+                    driver.endpoint_interrupt_in(),
+                    driver.buffer(),
+                    driver.in_packet_size() as u32)
+            } else {
+                Ok(())
+            }
         } else {
             Err(Error::NoWaiter)
         }
@@ -316,16 +320,17 @@ impl UsbDevice {
 
     fn on_control_completed(
         &mut self,
-        endpoint_id: EndpointId,
         setup_data: SetupData,
         buf: *const (),
         len: u32,
     ) -> Result<()> {
         if self.is_initialized {
-            if let Some(waiter) = self.event_waiters.get(&setup_data) {
-                return waiter
-                    .on_control_completed(endpoint_id, setup_data, buf, len)
-                    .map_err(Error::ClassDriverError);
+            if let Some(waiter) = self.event_waiters.get_mut(&setup_data) {
+                let mut waiter = *waiter;
+                return self.interrupt_in(
+                    waiter.endpoint_interrupt_in(),
+                    waiter.buffer(),
+                    waiter.in_packet_size() as u32);
             }
             return Err(Error::NoWaiter);
         }
@@ -413,11 +418,6 @@ impl UsbDevice {
     }
 
     fn initialize_phase3(&mut self) -> Result<()> {
-        for &config in self.ep_configs.as_slice() {
-            if let Some(driver) = self.class_drivers.get_mut(&config.endpoint_id.number()) {
-                driver.set_endpoint(&config);
-            }
-        }
         self.initialize_phase = 4;
         self.is_initialized = true;
         Ok(())

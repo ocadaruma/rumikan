@@ -1,8 +1,9 @@
 use crate::usb::descriptor::InterfaceDescriptor;
-use crate::usb::endpoint::{EndpointConfig, EndpointId};
+use crate::usb::endpoint::{EndpointConfig, EndpointId, EndpointType};
 use crate::usb::mem::allocate;
 use crate::usb::ring::SetupData;
 use core::mem::size_of;
+use core::ptr::null;
 
 #[derive(Debug)]
 pub enum Error {
@@ -34,43 +35,41 @@ impl ClassDriver {
     pub fn on_interrupt_completed(
         &self,
         ep_id: EndpointId,
-        buf: *const (),
         len: u32,
     ) -> Result<()> {
         match self {
-            ClassDriver::HidMouse(driver) => {
-                unsafe { driver.read() }.on_interrupt_completed(ep_id, buf, len)
-            }
+            ClassDriver::HidMouse(driver) => unsafe { driver.read() }.on_interrupt_completed(ep_id, len),
         }
         Ok(())
     }
 
-    pub fn on_control_completed(
-        &self,
-        ep_id: EndpointId,
-        setup_data: SetupData,
-        buf: *const (),
-        len: u32,
-    ) -> Result<()> {
-        // todo!()
-        Ok(())
-    }
-
     pub fn set_endpoint(&mut self, config: &EndpointConfig) {
-        // todo!()
+        match self {
+            ClassDriver::HidMouse(driver) => unsafe { driver.read() }.set_endpoint(config),
+        }
     }
 
     pub fn interface_index(&self) -> u8 {
         match self {
             ClassDriver::HidMouse(driver) => unsafe { driver.read() }.interface_index,
-            _ => 0, // todo!()
         }
     }
 
-    pub fn on_endpoints_configured(&mut self) {
+    pub fn buffer(&self) -> *const () {
         match self {
-            ClassDriver::HidMouse(driver) => unsafe { driver.read() }.on_endpoints_configured(),
-            _ => {}
+            ClassDriver::HidMouse(driver) => unsafe { driver.read() }.buf,
+        }
+    }
+
+    pub fn in_packet_size(&self) -> usize {
+        match self {
+            ClassDriver::HidMouse(_) => HidMouseDriver::IN_PACKET_SIZE,
+        }
+    }
+
+    pub fn endpoint_interrupt_in(&self) -> EndpointId {
+        match self {
+            ClassDriver::HidMouse(driver) => unsafe { driver.read() }.endpoint_interrupt_in,
         }
     }
 }
@@ -80,17 +79,25 @@ pub struct HidMouseDriver {
     num_observers: usize,
     interface_index: u8,
     initialize_phase: u8,
+    endpoint_interrupt_in: EndpointId,
+    buf: *const (),
 }
 
 impl HidMouseDriver {
-    pub fn on_endpoints_configured(&mut self) {
-        self.initialize_phase = 1;
+    const IN_PACKET_SIZE: usize = 3;
+
+    pub fn set_endpoint(&mut self, config: &EndpointConfig) {
+        if config.endpoint_type == EndpointType::Interrupt {
+            if config.endpoint_id.is_in() {
+                self.endpoint_interrupt_in = config.endpoint_id;
+            }
+        }
     }
 
-    pub fn on_interrupt_completed(&self, ep_id: EndpointId, buf: *const (), len: u32) {
+    pub fn on_interrupt_completed(&self, ep_id: EndpointId, len: u32) {
         if ep_id.is_in() {
             let (x, y) = unsafe {
-                let ptr = buf as *const u8;
+                let ptr = self.buf as *const u8;
                 (ptr.add(1).read(), ptr.add(2).read())
             };
             printk!("event received. (x, y) = ({}, {})\n", x, y);
