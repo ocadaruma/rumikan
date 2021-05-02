@@ -1,3 +1,4 @@
+use crate::error::ErrorContext;
 use crate::util::ArrayVec;
 
 #[derive(Debug)]
@@ -19,11 +20,12 @@ impl Pci {
 }
 
 #[derive(Debug)]
-pub enum Error {
+pub enum ErrorType {
     TooManyDevices,
     IndexOutOfRange,
 }
 
+pub type Error = ErrorContext<ErrorType>;
 pub type Result<T> = core::result::Result<T, Error>;
 
 impl Pci {
@@ -34,18 +36,14 @@ impl Pci {
         }
         for function in (0u8..8).filter(|&function| Self::read_vendor_id(0, 0, function) != 0xffff)
         {
-            if let err @ Err(_) = self.scan_bus(function) {
-                return err;
-            }
+            self.scan_bus(function)?;
         }
         Ok(())
     }
 
     fn scan_bus(&mut self, bus: u8) -> Result<()> {
         for device in (0u8..32).filter(|&device| Self::read_vendor_id(bus, device, 0) != 0xffff) {
-            if let err @ Err(_) = self.scan_device(bus, device) {
-                return err;
-            }
+            self.scan_device(bus, device)?;
         }
         Ok(())
     }
@@ -58,9 +56,7 @@ impl Pci {
         for function in
             (0u8..8).filter(|&function| Self::read_vendor_id(bus, device, function) != 0xffff)
         {
-            if let err @ Err(_) = self.scan_function(bus, device, function) {
-                return err;
-            }
+            self.scan_function(bus, device, function)?;
         }
         Ok(())
     }
@@ -89,7 +85,7 @@ impl Pci {
             })
             .is_err()
         {
-            return Err(Error::TooManyDevices);
+            return Err(make_error!(ErrorType::TooManyDevices));
         }
 
         if class_code.base == 0x06 && class_code.sub == 0x04 {
@@ -146,7 +142,7 @@ impl Device {
 
     pub fn read_bar(&self, index: u8) -> Result<usize> {
         if index >= 6 {
-            return Err(Error::IndexOutOfRange);
+            return Err(make_error!(ErrorType::IndexOutOfRange));
         }
 
         let addr = 0x10 + (4 * index);
@@ -159,7 +155,7 @@ impl Device {
             return Ok(bar as usize);
         }
         if index >= 5 {
-            return Err(Error::IndexOutOfRange);
+            return Err(make_error!(ErrorType::IndexOutOfRange));
         }
 
         out32(

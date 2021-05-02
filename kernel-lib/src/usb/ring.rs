@@ -1,3 +1,4 @@
+use crate::error::ErrorContext;
 use crate::usb::endpoint::EndpointId;
 use crate::usb::mem::allocate_array;
 use crate::usb::ring::TrbType::Unsupported;
@@ -7,10 +8,11 @@ use core::mem::transmute;
 use xhci::accessor;
 use xhci::registers::InterruptRegisterSet;
 
+pub type Error = ErrorContext<ErrorType>;
 pub type Result<T> = core::result::Result<T, Error>;
 
 #[derive(Debug)]
-pub enum Error {
+pub enum ErrorType {
     AllocError(crate::usb::mem::Error),
 }
 
@@ -482,7 +484,7 @@ impl Ring {
                 self.buffer = ptr;
                 Ok(())
             }
-            Err(err) => Err(Error::AllocError(err)),
+            Err(err) => Err(make_error!(ErrorType::AllocError(err))),
         }
     }
 
@@ -575,12 +577,14 @@ impl EventRing {
         self.cycle_bit = true;
         self.len = len;
 
-        let buffer_ptr =
-            allocate_array::<Trb>(len, Some(64), Some(64 * 1024)).map_err(Error::AllocError)?;
+        let buffer_ptr = allocate_array::<Trb>(len, Some(64), Some(64 * 1024))
+            .map_err(ErrorType::AllocError)
+            .map_err(|e| make_error!(e))?;
 
         let segment_table_ptr =
             allocate_array::<EventRingSegmentTableEntry>(1, Some(64), Some(64 * 1024))
-                .map_err(Error::AllocError)?;
+                .map_err(ErrorType::AllocError)
+                .map_err(|e| make_error!(e))?;
 
         unsafe {
             segment_table_ptr.read().set_ring_segment_size(len as u16);

@@ -1,3 +1,4 @@
+use crate::error::ErrorContext;
 use core::mem::size_of;
 
 const MEMORY_POOL_SIZE: usize = 4096 * 32 / 64;
@@ -10,10 +11,11 @@ static mut OFFSET: usize = 0;
 struct Alignment([u8; 64]);
 
 #[derive(Debug)]
-pub enum Error {
+pub enum ErrorType {
     OutOfMemory,
 }
 
+pub type Error = ErrorContext<ErrorType>;
 pub type Result<T> = core::result::Result<T, Error>;
 
 #[cfg(test)]
@@ -51,7 +53,7 @@ pub fn allocate<T>(
             Ok(ptr)
         }
     } else {
-        Err(Error::OutOfMemory)
+        Err(make_error!(ErrorType::OutOfMemory))
     }
 }
 

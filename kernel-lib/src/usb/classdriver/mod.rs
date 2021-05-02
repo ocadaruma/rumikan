@@ -1,13 +1,15 @@
+use crate::error::ErrorContext;
 use crate::usb::descriptor::InterfaceDescriptor;
 use crate::usb::endpoint::{EndpointConfig, EndpointId, EndpointType};
 use crate::usb::mem::allocate;
 use core::mem::size_of;
 
 #[derive(Debug)]
-pub enum Error {
+pub enum ErrorType {
     NotImplemented,
 }
 
+pub type Error = ErrorContext<ErrorType>;
 pub type Result<T> = core::result::Result<T, Error>;
 
 #[derive(Debug, Copy, Clone)]

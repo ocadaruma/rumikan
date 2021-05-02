@@ -6,6 +6,6 @@ macro_rules! printk {
 #[macro_export]
 macro_rules! make_error {
     ($err:expr) => {
-        $crate::error::ErrorWithInfo::new($err, file!(), line!())
+        $crate::error::ErrorContext::new($err, module_path!(), line!())
     };
 }

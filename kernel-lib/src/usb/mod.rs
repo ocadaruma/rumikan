@@ -7,6 +7,7 @@ mod mem;
 mod port;
 mod ring;
 
+use crate::error::ErrorContext;
 use crate::usb::devmgr::DeviceManager;
 use crate::usb::port::Port;
 use crate::usb::ring::{
@@ -43,13 +44,14 @@ impl Mapper for IdentityMapper {
 }
 
 #[derive(Debug)]
-pub enum Error {
+pub enum ErrorType {
     InvalidPhase,
     NotImplemented,
     InvalidSlotId,
     DeviceError(devmgr::Error),
 }
 
+pub type Error = ErrorContext<ErrorType>;
 pub type Result<T> = core::result::Result<T, Error>;
 
 pub struct Xhc {
@@ -136,7 +138,7 @@ impl Xhc {
                 TrbType::TransferEvent(trb) => self.on_transfer_event(trb),
                 TrbType::CommandCompletionEvent(trb) => self.on_command_completion_event(trb),
                 TrbType::PortStatusChangeEvent(trb) => self.on_port_status_change_event(trb),
-                _ => Err(Error::NotImplemented),
+                _ => Err(make_error!(ErrorType::NotImplemented)),
             },
             None => Ok(()),
         };
@@ -151,9 +153,10 @@ impl Xhc {
         let dev = self
             .device_manager
             .find_by_slot(slot_id)
-            .ok_or(Error::InvalidSlotId)?;
+            .ok_or_else(|| make_error!(ErrorType::InvalidSlotId))?;
         dev.on_transfer_event_received(&trb)
-            .map_err(Error::DeviceError)?;
+            .map_err(ErrorType::DeviceError)
+            .map_err(|e| make_error!(e))?;
 
         let port_id = dev.device_context().slot_context.root_hub_port_num();
         if dev.is_initialized()
@@ -185,7 +188,7 @@ impl Xhc {
                     let dev = self
                         .device_manager
                         .find_by_slot(trb.slot_id())
-                        .ok_or(Error::InvalidSlotId)?;
+                        .ok_or_else(|| make_error!(ErrorType::InvalidSlotId))?;
                     dev.device_context().slot_context.root_hub_port_num()
                 };
 
@@ -206,23 +209,27 @@ impl Xhc {
                         .find_by_slot(trb.slot_id())
                         .expect("Existence is guaranteed here")
                         .start_initialize()
-                        .map_err(Error::DeviceError);
+                        .map_err(ErrorType::DeviceError)
+                        .map_err(|e| make_error!(e));
                 }
             }
             TrbType::ConfigureEndpointCommand(_) => {
                 let dev = self
                     .device_manager
                     .find_by_slot(trb.slot_id())
-                    .ok_or(Error::InvalidSlotId)?;
+                    .ok_or_else(|| make_error!(ErrorType::InvalidSlotId))?;
                 let port_id = dev.device_context().slot_context.root_hub_port_num();
                 if self.port_config_phase[port_id as usize] == ConfigPhase::ConfiguringEndpoints {
                     self.port_config_phase[port_id as usize] = ConfigPhase::Configured;
-                    return dev.on_endpoints_configured().map_err(Error::DeviceError);
+                    return dev
+                        .on_endpoints_configured()
+                        .map_err(ErrorType::DeviceError)
+                        .map_err(|e| make_error!(e));
                 }
             }
             _ => {}
         }
-        Err(Error::InvalidPhase)
+        Err(make_error!(ErrorType::InvalidPhase))
     }
 
     fn address_device(&mut self, port_id: u8, slot_id: SlotId) -> Result<()> {
@@ -230,13 +237,16 @@ impl Xhc {
         let dbreg = self.registers.doorbell.single_at(slot_id.value() as usize);
         self.device_manager
             .allocate_device(slot_id, dbreg)
-            .map_err(Error::DeviceError)?;
+            .map_err(ErrorType::DeviceError)
+            .map_err(|e| make_error!(e))?;
 
         let dev = self
             .device_manager
             .find_by_slot(slot_id)
             .expect("Existence is guaranteed here");
-        dev.address_device(port).map_err(Error::DeviceError)?;
+        dev.address_device(port)
+            .map_err(ErrorType::DeviceError)
+            .map_err(|e| make_error!(e))?;
 
         self.port_config_phase[port_id as usize] = ConfigPhase::AddressingDevice;
         let cmd = AddressDeviceCommandTrb::new(slot_id, dev.input_context_ptr());
@@ -262,7 +272,7 @@ impl Xhc {
                 self.enable_slot(&mut port);
                 Ok(())
             }
-            _ => Err(Error::InvalidPhase),
+            _ => Err(make_error!(ErrorType::InvalidPhase)),
         }
     }
 
@@ -273,7 +283,9 @@ impl Xhc {
             .find_by_slot(slot_id)
             .expect("Device existence is guaranteed here");
         let input_context_ptr = dev.input_context_ptr();
-        dev.configure_endpoints(port).map_err(Error::DeviceError)?;
+        dev.configure_endpoints(port)
+            .map_err(ErrorType::DeviceError)
+            .map_err(|e| make_error!(e))?;
 
         self.port_config_phase[port_id as usize] = ConfigPhase::ConfiguringEndpoints;
         let cmd = ConfigureEndpointCommandTrb::new(slot_id, input_context_ptr);
@@ -316,7 +328,7 @@ impl Xhc {
                             ConfigPhase::ResettingPort;
                         port.reset();
                     }
-                    _ => return Err(Error::InvalidPhase),
+                    _ => return Err(make_error!(ErrorType::InvalidPhase)),
                 },
             }
         }
