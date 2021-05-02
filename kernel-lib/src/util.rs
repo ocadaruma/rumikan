@@ -135,10 +135,8 @@ where
     pub fn remove(&mut self, key: &K) -> Option<V> {
         for elem in self.buf.iter_mut() {
             match elem {
-                Some((k, _)) if k == key => {
-                    return elem.take().map(|(_, v)| v)
-                },
-                _ => {},
+                Some((k, _)) if k == key => return elem.take().map(|(_, v)| v),
+                _ => {}
             }
         }
         None

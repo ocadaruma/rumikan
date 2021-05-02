@@ -349,6 +349,7 @@ pub struct SetupData(u64);
 impl SetupData {
     pub const REQUEST_GET_DESCRIPTOR: u8 = 6;
     pub const REQUEST_SET_CONFIGURATION: u8 = 9;
+    pub const REQUEST_SET_PROTOCOL: u8 = 11;
 
     pub fn new() -> Self {
         Self(0)
@@ -415,8 +416,12 @@ pub struct RequestType(u8);
 impl RequestType {
     pub const DIRECTION_OUT: u8 = 0;
     pub const DIRECTION_IN: u8 = 1;
+
     pub const TYPE_STANDARD: u8 = 0;
+    pub const TYPE_CLASS: u8 = 1;
+
     pub const RECIPIENT_DEVICE: u8 = 0;
+    pub const RECIPIENT_INTERFACE: u8 = 1;
 
     pub fn new() -> Self {
         Self(0)

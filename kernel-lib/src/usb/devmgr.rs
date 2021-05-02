@@ -191,7 +191,7 @@ impl UsbDevice {
         let port_speed = port.port_speed().ok_or(Error::UnknownXHCISpeedID)?;
 
         for i in 0..self.ep_configs.len() {
-            let mut ep_config = self.ep_configs[i];
+            let ep_config = self.ep_configs[i];
 
             let ep_ctx = unsafe {
                 self.input_context
@@ -269,7 +269,34 @@ impl UsbDevice {
     }
 
     pub fn on_endpoints_configured(&mut self) -> Result<()> {
-        unimplemented!()
+        for i in 0..self.ep_configs.len() {
+            let conf = self.ep_configs[i];
+            let driver = self
+                .class_drivers
+                .get_mut(&conf.endpoint_id.number())
+                .unwrap();
+            let setup_data = SetupData::new()
+                .set_request_type(
+                    RequestType::new()
+                        .set_direction(RequestType::DIRECTION_OUT)
+                        .set_type(RequestType::TYPE_CLASS)
+                        .set_recipient(RequestType::RECIPIENT_INTERFACE),
+                )
+                .set_request(SetupData::REQUEST_SET_PROTOCOL)
+                .set_value(0)
+                .set_index(driver.interface_index() as u16)
+                .set_length(0);
+            driver.on_endpoints_configured();
+            let driver = *driver;
+            self.control_out(
+                EndpointId::DEFAULT_CONTROL_PIPE_ID,
+                setup_data,
+                None,
+                0,
+                Some(driver),
+            )?;
+        }
+        Ok(())
     }
 
     fn on_interrupt_completed(

@@ -59,15 +59,34 @@ impl ClassDriver {
     pub fn set_endpoint(&mut self, config: &EndpointConfig) {
         // todo!()
     }
+
+    pub fn interface_index(&self) -> u8 {
+        match self {
+            ClassDriver::HidMouse(driver) => unsafe { driver.read() }.interface_index,
+            _ => 0, // todo!()
+        }
+    }
+
+    pub fn on_endpoints_configured(&mut self) {
+        match self {
+            ClassDriver::HidMouse(driver) => unsafe { driver.read() }.on_endpoints_configured(),
+            _ => {}
+        }
+    }
 }
 
 #[derive(Debug)]
 pub struct HidMouseDriver {
     num_observers: usize,
     interface_index: u8,
+    initialize_phase: u8,
 }
 
 impl HidMouseDriver {
+    pub fn on_endpoints_configured(&mut self) {
+        self.initialize_phase = 1;
+    }
+
     pub fn on_interrupt_completed(&self, ep_id: EndpointId, buf: *const (), len: u32) {
         if ep_id.is_in() {
             let (x, y) = unsafe {
