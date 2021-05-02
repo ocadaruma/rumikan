@@ -29,7 +29,8 @@ impl ClassDriver {
                         num_observers: 0,
                         interface_index: desc.interface_number(),
                         endpoint_interrupt_in: EndpointId::new(0),
-                        buf: allocate(1024, None, None).expect("Failed to allocate memory for driver"),
+                        buf: allocate(1024, None, None)
+                            .expect("Failed to allocate memory for driver"),
                     });
                 }
                 return Some(ClassDriver::HidMouse(driver_ptr));
