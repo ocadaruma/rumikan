@@ -1,7 +1,6 @@
 use crate::usb::descriptor::InterfaceDescriptor;
 use crate::usb::endpoint::{EndpointConfig, EndpointId, EndpointType};
 use crate::usb::mem::allocate;
-use crate::usb::ring::SetupData;
 use core::mem::size_of;
 use core::ptr::null;
 
@@ -32,13 +31,11 @@ impl ClassDriver {
         None
     }
 
-    pub fn on_interrupt_completed(
-        &self,
-        ep_id: EndpointId,
-        len: u32,
-    ) -> Result<()> {
+    pub fn on_interrupt_completed(&self, ep_id: EndpointId, len: u32) -> Result<()> {
         match self {
-            ClassDriver::HidMouse(driver) => unsafe { driver.read() }.on_interrupt_completed(ep_id, len),
+            ClassDriver::HidMouse(driver) => {
+                unsafe { driver.read() }.on_interrupt_completed(ep_id, len)
+            }
         }
         Ok(())
     }

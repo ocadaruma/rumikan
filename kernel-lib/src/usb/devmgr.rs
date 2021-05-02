@@ -237,10 +237,7 @@ impl UsbDevice {
 
         if let TrbType::Normal(normal_trb) = unsafe { *trb.trb_pointer() }.specialize() {
             let transfer_length = normal_trb.transfer_length() - residual_length;
-            return self.on_interrupt_completed(
-                trb.endpoint_id(),
-                transfer_length,
-            );
+            return self.on_interrupt_completed(trb.endpoint_id(), transfer_length);
         }
 
         let setup_stage_trb = if let Some(trb) = self.setup_stage_map.remove(&trb.trb_pointer()) {
@@ -259,9 +256,7 @@ impl UsbDevice {
                     transfer_length,
                 )
             }
-            TrbType::StatusStage(_) => {
-                self.on_control_completed(setup_data, null(), 0)
-            }
+            TrbType::StatusStage(_) => self.on_control_completed(setup_data, null(), 0),
             _ => Err(Error::NotImplemented),
         }
     }
@@ -296,11 +291,7 @@ impl UsbDevice {
         Ok(())
     }
 
-    fn on_interrupt_completed(
-        &mut self,
-        endpoint_id: EndpointId,
-        len: u32,
-    ) -> Result<()> {
+    fn on_interrupt_completed(&mut self, endpoint_id: EndpointId, len: u32) -> Result<()> {
         if let Some(driver) = self.class_drivers.get(&endpoint_id.number()) {
             if endpoint_id.is_in() {
                 driver
@@ -309,7 +300,8 @@ impl UsbDevice {
                 self.interrupt_in(
                     driver.endpoint_interrupt_in(),
                     driver.buffer(),
-                    driver.in_packet_size() as u32)
+                    driver.in_packet_size() as u32,
+                )
             } else {
                 Ok(())
             }
@@ -330,7 +322,8 @@ impl UsbDevice {
                 return self.interrupt_in(
                     waiter.endpoint_interrupt_in(),
                     waiter.buffer(),
-                    waiter.in_packet_size() as u32);
+                    waiter.in_packet_size() as u32,
+                );
             }
             return Err(Error::NoWaiter);
         }
