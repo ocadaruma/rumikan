@@ -78,6 +78,7 @@ pub enum ArrayMapError {
     NoSpace,
 }
 
+#[allow(clippy::new_without_default)]
 impl<K, V, const N: usize> ArrayMap<K, V, N>
 where
     K: PartialEq,
@@ -111,22 +112,18 @@ where
     }
 
     pub fn get(&self, key: &K) -> Option<&V> {
-        for elem in self.buf.iter() {
-            if let Some((k, v)) = elem {
-                if k == key {
-                    return Some(v);
-                }
+        for (k, v) in self.buf.iter().flatten() {
+            if k == key {
+                return Some(v);
             }
         }
         None
     }
 
     pub fn get_mut(&mut self, key: &K) -> Option<&mut V> {
-        for elem in self.buf.iter_mut() {
-            if let Some((k, v)) = elem {
-                if k == key {
-                    return Some(v);
-                }
+        for (k, v) in self.buf.iter_mut().flatten() {
+            if k == key {
+                return Some(v);
             }
         }
         None

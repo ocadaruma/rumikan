@@ -1,5 +1,4 @@
 use bit_field::BitField;
-use core::mem::transmute;
 
 #[derive(Debug)]
 pub struct Descriptor(*const u8);
@@ -10,20 +9,20 @@ impl Descriptor {
 
     pub fn specialize(&self) -> DescriptorType {
         match unsafe { self.0.add(1).read() } {
-            DeviceDescriptor::TYPE => DescriptorType::Device(unsafe {
-                transmute::<_, *const DeviceDescriptor>(self.0).read()
-            }),
+            DeviceDescriptor::TYPE => {
+                DescriptorType::Device(unsafe { (self.0 as *const DeviceDescriptor).read() })
+            }
             ConfigurationDescriptor::TYPE => DescriptorType::Configuration(unsafe {
-                transmute::<_, *const ConfigurationDescriptor>(self.0).read()
+                (self.0 as *const ConfigurationDescriptor).read()
             }),
-            InterfaceDescriptor::TYPE => DescriptorType::Interface(unsafe {
-                transmute::<_, *const InterfaceDescriptor>(self.0).read()
-            }),
-            EndpointDescriptor::TYPE => DescriptorType::Endpoint(unsafe {
-                transmute::<_, *const EndpointDescriptor>(self.0).read()
-            }),
+            InterfaceDescriptor::TYPE => {
+                DescriptorType::Interface(unsafe { (self.0 as *const InterfaceDescriptor).read() })
+            }
+            EndpointDescriptor::TYPE => {
+                DescriptorType::Endpoint(unsafe { (self.0 as *const EndpointDescriptor).read() })
+            }
             HidDescriptor::TYPE => {
-                DescriptorType::Hid(unsafe { transmute::<_, *const HidDescriptor>(self.0).read() })
+                DescriptorType::Hid(unsafe { (self.0 as *const HidDescriptor).read() })
             }
             _ => DescriptorType::Unsupported,
         }

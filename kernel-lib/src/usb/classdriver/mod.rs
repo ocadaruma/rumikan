@@ -83,10 +83,8 @@ impl HidMouseDriver {
     const IN_PACKET_SIZE: usize = 3;
 
     pub fn set_endpoint(&mut self, config: &EndpointConfig) {
-        if config.endpoint_type == EndpointType::Interrupt {
-            if config.endpoint_id.is_in() {
-                self.endpoint_interrupt_in = config.endpoint_id;
-            }
+        if config.endpoint_type == EndpointType::Interrupt && config.endpoint_id.is_in() {
+            self.endpoint_interrupt_in = config.endpoint_id;
         }
     }
 
