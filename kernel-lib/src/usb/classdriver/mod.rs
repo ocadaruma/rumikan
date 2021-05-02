@@ -102,7 +102,7 @@ impl HidMouseDriver {
                 let ptr = self.buf as *const u8;
                 (ptr.add(1).read(), ptr.add(2).read())
             };
-            printk!("event received. (x, y) = ({}, {})\n", x, y);
+            info!("event received. (x, y) = ({}, {})", x, y);
         }
         // todo!()
     }

@@ -359,7 +359,7 @@ impl Xhc {
             .hcsparams1
             .read()
             .number_of_device_slots();
-        printk!("Max device slots: {}\n", num_device_slots);
+        info!("Max device slots: {}", num_device_slots);
 
         let max_slots = self.device_manager.max_slots() as u8;
         self.registers

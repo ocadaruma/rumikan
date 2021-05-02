@@ -6,10 +6,13 @@ use core::panic::PanicInfo;
 
 use rumikan_kernel_lib::console::{init_global_console, Console};
 use rumikan_kernel_lib::graphics::{FrameBuffer, PixelColor};
+use rumikan_kernel_lib::logger::{init_logger, LogLevel};
 use rumikan_kernel_lib::pci::{ClassCode, Pci};
-use rumikan_kernel_lib::printk;
 use rumikan_kernel_lib::usb::Xhc;
 use rumikan_shared::graphics::FrameBufferInfo;
+
+#[macro_use]
+extern crate rumikan_kernel_lib;
 
 #[no_mangle]
 pub extern "C" fn _start(frame_buffer_info: FrameBufferInfo) -> ! {
@@ -20,8 +23,9 @@ pub extern "C" fn _start(frame_buffer_info: FrameBufferInfo) -> ! {
         PixelColor::new(0xff, 0xff, 0xff),
     );
     init_global_console(console);
+    init_logger(LogLevel::Info);
 
-    printk!("Hello, world!\n");
+    info!("Hello, world!");
     frame_buffer.write_mouse_cursor(
         50,
         50,
@@ -31,13 +35,13 @@ pub extern "C" fn _start(frame_buffer_info: FrameBufferInfo) -> ! {
 
     let mut pci = Pci::new();
     if pci.scan_all_bus().is_err() {
-        printk!("Failed to scan PCI bus\n");
+        warn!("Failed to scan PCI bus");
     }
 
     for &dev in pci.devices() {
         let vendor_id = dev.read_vendor_id();
-        printk!(
-            "{}.{}.{}: vend 0x{:04x}, head 0x{:-2x}\n",
+        debug!(
+            "{}.{}.{}: vend 0x{:04x}, head 0x{:-2x}",
             dev.bus,
             dev.device,
             dev.function,
@@ -62,14 +66,14 @@ pub extern "C" fn _start(frame_buffer_info: FrameBufferInfo) -> ! {
         }
     }
     if let Some(dev) = xhc_dev {
-        printk!(
-            "xHC has been found: {}.{}.{}\n",
+        debug!(
+            "xHC has been found: {}.{}.{}",
             dev.bus,
             dev.device,
             dev.function
         );
         let xhc_mmio_base = dev.read_bar(0).unwrap() & !0xfusize;
-        printk!("xHC mmio_base = 0x{:08x}\n", xhc_mmio_base);
+        debug!("xHC mmio_base = 0x{:08x}", xhc_mmio_base);
         dev.switch_ehci2xhci_if_necessary(&pci);
 
         let mut xhc = Xhc::new(xhc_mmio_base);
@@ -78,15 +82,15 @@ pub extern "C" fn _start(frame_buffer_info: FrameBufferInfo) -> ! {
 
         for i in 1..=xhc.max_ports() {
             let mut port = xhc.port_at(i);
-            printk!(
-                "Port {} is_connected={}\n",
+            debug!(
+                "Port {} is_connected={}",
                 port.port_num(),
                 port.is_connected()
             );
 
             if port.is_connected() {
                 if let Err(err) = xhc.configure_port(&mut port) {
-                    printk!("Failed to configure {} due to {:?}\n", port.port_num(), err);
+                    warn!("Failed to configure {} due to {:?}", port.port_num(), err);
                 }
             }
         }

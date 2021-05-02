@@ -7,6 +7,13 @@
 #[macro_use]
 pub mod console;
 pub mod graphics;
+pub mod logger;
 pub mod pci;
 pub mod usb;
 pub mod util;
+
+#[macro_use]
+extern crate log;
+
+// re-export macros
+pub use log::{debug, error, info, trace, warn};
