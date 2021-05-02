@@ -251,7 +251,7 @@ impl UsbDevice {
         };
 
         let setup_data = SetupData::from_trb(unsafe { setup_stage_trb.read() });
-        match unsafe { *trb.trb_pointer() }.specialize() {
+        match unsafe { trb.trb_pointer().read() }.specialize() {
             TrbType::DataStage(data_stage_trb) => {
                 let transfer_length = data_stage_trb.trb_transfer_length() - residual_length;
                 self.on_control_completed(

@@ -109,11 +109,6 @@ impl Console {
     }
 }
 
-#[macro_export]
-macro_rules! printk {
-    ($($arg:tt)*) => ($crate::console::_print(format_args!($($arg)*)));
-}
-
 pub fn _print(args: Arguments) {
     unsafe {
         CONSOLE.as_mut().unwrap().print(args);

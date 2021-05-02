@@ -575,15 +575,18 @@ impl EventRing {
         self.cycle_bit = true;
         self.len = len;
 
-        let buffer_ptr = allocate_array::<Trb>(len, Some(64), Some(64 * 1024))
-            .map_err(Error::AllocError)?;
+        let buffer_ptr =
+            allocate_array::<Trb>(len, Some(64), Some(64 * 1024)).map_err(Error::AllocError)?;
 
-        let segment_table_ptr = allocate_array::<EventRingSegmentTableEntry>(1, Some(64), Some(64 * 1024))
-            .map_err(Error::AllocError)?;
+        let segment_table_ptr =
+            allocate_array::<EventRingSegmentTableEntry>(1, Some(64), Some(64 * 1024))
+                .map_err(Error::AllocError)?;
 
         unsafe {
             segment_table_ptr.read().set_ring_segment_size(len as u16);
-            segment_table_ptr.read().set_ring_segment_base_address(buffer_ptr as u64);
+            segment_table_ptr
+                .read()
+                .set_ring_segment_base_address(buffer_ptr as u64);
         }
 
         interrupter.update(|i| {

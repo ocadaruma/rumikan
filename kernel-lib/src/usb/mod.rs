@@ -166,7 +166,10 @@ impl Xhc {
     }
 
     fn on_command_completion_event(&mut self, trb: CommandCompletionEventTrb) -> Result<()> {
-        debug!("CommandCompletionEvent: slot_id = {}", trb.slot_id().value());
+        debug!(
+            "CommandCompletionEvent: slot_id = {}",
+            trb.slot_id().value()
+        );
 
         match unsafe { *trb.trb_pointer() }.specialize() {
             TrbType::EnableSlotCommand(_) => {

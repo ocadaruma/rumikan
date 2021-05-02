@@ -5,15 +5,18 @@
 #![cfg_attr(not(test), no_std)]
 
 #[macro_use]
+extern crate log;
+
+#[macro_use]
+pub mod macros;
+
 pub mod console;
+pub mod error;
 pub mod graphics;
 pub mod logger;
 pub mod pci;
 pub mod usb;
 pub mod util;
-
-#[macro_use]
-extern crate log;
 
 // re-export macros
 pub use log::{debug, error, info, trace, warn};
