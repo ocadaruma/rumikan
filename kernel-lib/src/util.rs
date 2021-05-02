@@ -134,11 +134,39 @@ where
 
     pub fn remove(&mut self, key: &K) -> Option<V> {
         for elem in self.buf.iter_mut() {
-            if let Some((k, v)) = elem.take() {
-                if &k == key {
-                    return Some(v);
-                }
+            match elem {
+                Some((k, _)) if k == key => {
+                    return elem.take().map(|(_, v)| v)
+                },
+                _ => {},
             }
+        }
+        None
+    }
+
+    pub fn iter_mut(&mut self) -> IterMut<K, V, N> {
+        IterMut {
+            inner: self.buf.as_mut(),
+        }
+    }
+}
+
+pub struct IterMut<'a, K, V, const N: usize> {
+    inner: &'a mut [Option<(K, V)>],
+}
+
+impl<'a, K, V, const N: usize> Iterator for IterMut<'a, K, V, N> {
+    type Item = (&'a K, &'a mut V);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let mut entries = core::mem::replace(&mut self.inner, &mut []);
+        while !entries.is_empty() {
+            let (head, tail) = entries.split_first_mut().unwrap();
+            if let Some((k, v)) = head {
+                self.inner = tail;
+                return Some((k, v));
+            }
+            entries = tail;
         }
         None
     }
@@ -183,9 +211,30 @@ mod tests {
     fn array_map_remove() {
         let mut m: ArrayMap<i32, &str, 3> = ArrayMap::new();
         assert_eq!(m.insert(1, "one").unwrap(), None);
+        assert_eq!(m.insert(2, "two").unwrap(), None);
+        assert_eq!(m.insert(3, "three").unwrap(), None);
         assert_eq!(m.get(&1), Some(&"one"));
+        assert_eq!(m.get(&2), Some(&"two"));
+        assert_eq!(m.get(&3), Some(&"three"));
 
-        assert_eq!(m.remove(&1), Some("one"));
-        assert_eq!(m.get(&1), None);
+        assert_eq!(m.remove(&2), Some("two"));
+        assert_eq!(m.get(&2), None);
+        assert_eq!(m.get(&1), Some(&"one"));
+        assert_eq!(m.get(&3), Some(&"three"));
+    }
+
+    #[test]
+    fn array_map_iter_mut() {
+        let mut m: ArrayMap<i32, &str, 3> = ArrayMap::new();
+        m.insert(1, "one").unwrap();
+        m.insert(2, "two").unwrap();
+        m.insert(3, "three").unwrap();
+        m.remove(&2).unwrap();
+
+        assert_eq!(m.get(&1), Some(&"one"));
+        let mut iter = m.iter_mut();
+        assert_eq!(iter.next(), Some((&1, &mut "one")));
+        assert_eq!(iter.next(), Some((&3, &mut "three")));
+        assert!(iter.next().is_none());
     }
 }
