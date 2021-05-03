@@ -22,7 +22,7 @@ pub struct Trb(u128);
 
 impl Trb {
     pub fn cycle_bit(&self) -> bool {
-        self.0.get_bit(65)
+        self.0.get_bit(96)
     }
 
     pub fn specialize(&self) -> TrbType {
@@ -578,19 +578,17 @@ impl EventRing {
         self.len = len;
 
         let buffer_ptr = allocate_array::<Trb>(len, Some(64), Some(64 * 1024))
-            .map_err(ErrorType::AllocError)
-            .map_err(|e| make_error!(e))?;
+            .map_err(|e| make_error!(ErrorType::AllocError(e)))?;
 
         let segment_table_ptr =
             allocate_array::<EventRingSegmentTableEntry>(1, Some(64), Some(64 * 1024))
-                .map_err(ErrorType::AllocError)
-                .map_err(|e| make_error!(e))?;
+                .map_err(|e| make_error!(ErrorType::AllocError(e)))?;
+        let mut table_entry = EventRingSegmentTableEntry::default();
+        table_entry.set_ring_segment_size(len as u16);
+        table_entry.set_ring_segment_base_address(buffer_ptr as u64);
 
         unsafe {
-            segment_table_ptr.read().set_ring_segment_size(len as u16);
-            segment_table_ptr
-                .read()
-                .set_ring_segment_base_address(buffer_ptr as u64);
+            segment_table_ptr.write(table_entry);
         }
 
         interrupter.update(|i| {
@@ -621,9 +619,9 @@ impl EventRing {
         let mut ptr = unsafe { ptr.add(1) };
 
         let segment_begin: *const Trb =
-            unsafe { transmute((*self.segment_table).ring_segment_base_address()) };
+            unsafe { transmute((self.segment_table.read()).ring_segment_base_address()) };
         let segment_end =
-            unsafe { segment_begin.add((*self.segment_table).ring_segment_size() as usize) };
+            unsafe { segment_begin.add((self.segment_table.read()).ring_segment_size() as usize) };
 
         if ptr == segment_end {
             ptr = segment_begin;

@@ -133,17 +133,22 @@ impl Xhc {
     }
 
     pub fn process_event(&mut self) -> Result<()> {
-        let result = match self.event_ring.peek_front() {
-            Some(trb) => match trb.specialize() {
-                TrbType::TransferEvent(trb) => self.on_transfer_event(trb),
-                TrbType::CommandCompletionEvent(trb) => self.on_command_completion_event(trb),
-                TrbType::PortStatusChangeEvent(trb) => self.on_port_status_change_event(trb),
-                _ => Err(make_error!(ErrorType::NotImplemented)),
-            },
+        match self.event_ring.peek_front() {
+            Some(trb) => {
+                let result = match trb.specialize() {
+                    TrbType::TransferEvent(trb) => self.on_transfer_event(trb),
+                    TrbType::CommandCompletionEvent(trb) => self.on_command_completion_event(trb),
+                    TrbType::PortStatusChangeEvent(trb) => self.on_port_status_change_event(trb),
+                    other => {
+                        debug!("Unexpected trb type: {:?}", other);
+                        Err(make_error!(ErrorType::NotImplemented))
+                    }
+                };
+                self.event_ring.pop();
+                result
+            }
             None => Ok(()),
-        };
-        self.event_ring.pop();
-        result
+        }
     }
 
     fn on_transfer_event(&mut self, trb: TransferEventTrb) -> Result<()> {
@@ -272,7 +277,10 @@ impl Xhc {
                 self.enable_slot(&mut port);
                 Ok(())
             }
-            _ => Err(make_error!(ErrorType::InvalidPhase)),
+            phase => {
+                debug!("port = {}, phase: {:?}", port_id, phase);
+                Err(make_error!(ErrorType::InvalidPhase))
+            }
         }
     }
 
@@ -318,11 +326,13 @@ impl Xhc {
         if port.is_connected() {
             match self.addressing_port {
                 Some(addressing_port) => {
-                    self.port_config_phase[addressing_port as usize] =
+                    debug!("Setting port to waiting. port: {}", addressing_port);
+                    self.port_config_phase[port.port_num() as usize] =
                         ConfigPhase::WaitingAddressed;
                 }
                 None => match self.port_config_phase[port.port_num() as usize] {
                     ConfigPhase::NotConnected | ConfigPhase::WaitingAddressed => {
+                        debug!("Setting port to resetting. port: {}", port.port_num());
                         self.addressing_port = Some(port.port_num());
                         self.port_config_phase[port.port_num() as usize] =
                             ConfigPhase::ResettingPort;
@@ -379,7 +389,7 @@ impl Xhc {
             .hcsparams1
             .read()
             .number_of_device_slots();
-        info!("Max device slots: {}", num_device_slots);
+        debug!("Max device slots: {}", num_device_slots);
 
         let max_slots = self.device_manager.max_slots() as u8;
         self.registers

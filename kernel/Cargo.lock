@@ -120,7 +120,7 @@ checksum = "8ccb82d61f80a663efe1f787a51b16b5a51e3314d6ac365b08639f52387b33f3"
 [[package]]
 name = "xhci"
 version = "0.5.2"
-source = "git+https://github.com/ocadaruma/xhci.git?branch=rumikan#0f412d67933c853796e07a661a8f342d6f6e7a8b"
+source = "git+https://github.com/ocadaruma/xhci.git?branch=rumikan#896840e3187688efe1da0de98d3090e3caaac726"
 dependencies = [
  "accessor",
  "bit_field",

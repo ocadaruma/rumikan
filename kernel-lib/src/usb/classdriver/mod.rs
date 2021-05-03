@@ -14,7 +14,7 @@ pub type Result<T> = core::result::Result<T, Error>;
 
 #[derive(Debug, Copy, Clone)]
 pub enum ClassDriver {
-    HidMouse(*const HidMouseDriver),
+    HidMouse(*mut HidMouseDriver),
 }
 
 impl ClassDriver {
@@ -52,7 +52,9 @@ impl ClassDriver {
 
     pub fn set_endpoint(&mut self, config: &EndpointConfig) {
         match self {
-            ClassDriver::HidMouse(driver) => unsafe { driver.read() }.set_endpoint(config),
+            ClassDriver::HidMouse(driver) => {
+                unsafe { driver.as_mut().unwrap() }.set_endpoint(config)
+            }
         }
     }
 
