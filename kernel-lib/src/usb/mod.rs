@@ -8,7 +8,6 @@ mod port;
 mod ring;
 
 use crate::error::ErrorContext;
-use crate::usb::context::DeviceContext;
 use crate::usb::devmgr::DeviceManager;
 use crate::usb::port::Port;
 use crate::usb::ring::{
