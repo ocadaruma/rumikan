@@ -1,9 +1,11 @@
 use crate::error::ErrorContext;
 use core::mem::size_of;
 
-const MEMORY_POOL_SIZE: usize = 4096 * 32 / 64;
+const MEMORY_POOL_BYTES: usize = 4096 * 32;
+const MEMORY_POOL_ALIGNMENT_COUNT: usize = MEMORY_POOL_BYTES / 64;
 
-static mut MEMORY_POOL: [Alignment; MEMORY_POOL_SIZE] = [Alignment([0; 64]); MEMORY_POOL_SIZE];
+static mut MEMORY_POOL: [Alignment; MEMORY_POOL_ALIGNMENT_COUNT] =
+    [Alignment([0; 64]); MEMORY_POOL_ALIGNMENT_COUNT];
 static mut OFFSET: usize = 0;
 
 #[derive(Copy, Clone)]
@@ -46,11 +48,12 @@ pub fn allocate<T>(
         }
     }
 
-    if offset + bytes <= MEMORY_POOL_SIZE * size_of::<Alignment>() {
+    if offset + bytes <= MEMORY_POOL_BYTES {
         unsafe {
             OFFSET = offset + bytes;
-            let ptr = (MEMORY_POOL.as_mut_ptr() as *mut T).add(offset);
-            Ok(ptr)
+            let base_ptr: *mut [Alignment; MEMORY_POOL_ALIGNMENT_COUNT] = &mut MEMORY_POOL;
+            let ptr = (base_ptr as *mut u8).add(offset);
+            Ok(ptr as *mut T)
         }
     } else {
         Err(make_error!(ErrorType::OutOfMemory))
@@ -99,6 +102,18 @@ mod tests {
             assert!(allocate::<()>(4096, None, None).is_ok());
         }
         assert!(allocate::<()>(4096, None, None).is_err());
+    }
+
+    #[test]
+    fn test_contiguous_layout() {
+        free_all();
+
+        let first_ptr = allocate::<()>(1, None, None).unwrap() as u64;
+        for i in 1..(4096 * 32) {
+            let ptr = allocate::<()>(1, None, None).unwrap() as u64;
+            assert_eq!(ptr - first_ptr, i);
+        }
+        assert!(allocate::<()>(1, None, None).is_err());
     }
 
     #[test]

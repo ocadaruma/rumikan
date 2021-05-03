@@ -479,13 +479,10 @@ impl Ring {
         self.write_index = 0;
         self.len = len;
 
-        match allocate_array::<Trb>(len, Some(64), Some(64 * 1024)) {
-            Ok(ptr) => {
-                self.buffer = ptr;
-                Ok(())
-            }
-            Err(err) => Err(make_error!(ErrorType::AllocError(err))),
-        }
+        let ptr = allocate_array::<Trb>(len, Some(64), Some(64 * 1024))
+            .map_err(|e| make_error!(ErrorType::AllocError(e)))?;
+        self.buffer = ptr;
+        Ok(())
     }
 
     pub fn ptr_as_u64(&self) -> u64 {

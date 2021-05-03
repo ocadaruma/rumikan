@@ -65,14 +65,12 @@ impl DeviceManager {
     }
 
     pub fn initialize(&mut self) -> Result<()> {
-        let ctx_ptr = match allocate::<*mut DeviceContext>(
+        let ctx_ptr = allocate::<*mut DeviceContext>(
             size_of::<*mut DeviceContext>() * (self.max_slots + 1),
             Some(64),
             Some(4096),
-        ) {
-            Ok(ptr) => ptr,
-            Err(err) => return Err(make_error!(ErrorType::AllocError(err))),
-        };
+        )
+        .map_err(|e| make_error!(ErrorType::AllocError(e)))?;
         self.device_contexts = ctx_ptr;
 
         Ok(())
@@ -80,14 +78,11 @@ impl DeviceManager {
 
     pub fn allocate_device(&mut self, slot_id: SlotId, dbreg: DoorbellRegister) -> Result<()> {
         let device_context = allocate_array::<DeviceContext>(1, Some(64), Some(4096))
-            .map_err(ErrorType::AllocError)
-            .map_err(|e| make_error!(e))?;
+            .map_err(|e| make_error!(ErrorType::AllocError(e)))?;
         let input_context = allocate_array::<InputContext>(1, Some(64), Some(4096))
-            .map_err(ErrorType::AllocError)
-            .map_err(|e| make_error!(e))?;
-        let data_buf = allocate::<()>(256, None, None)
-            .map_err(ErrorType::AllocError)
-            .map_err(|e| make_error!(e))?;
+            .map_err(|e| make_error!(ErrorType::AllocError(e)))?;
+        let data_buf =
+            allocate::<()>(256, None, None).map_err(|e| make_error!(ErrorType::AllocError(e)))?;
 
         let dev = UsbDevice {
             class_drivers: ArrayMap::new(),
@@ -111,8 +106,7 @@ impl DeviceManager {
 
         self.devices
             .insert(slot_id, dev)
-            .map_err(ErrorType::ArrayMapError)
-            .map_err(|e| make_error!(e))
+            .map_err(|e| make_error!(ErrorType::ArrayMapError(e)))
             .map(|_| ())
     }
 
@@ -164,9 +158,14 @@ impl UsbDevice {
     }
 
     pub fn address_device(&mut self, port: Port) -> Result<()> {
-        let ep0 = EndpointId::from(EndpointNumber::new(0), false);
+        let ep0 = EndpointId::DEFAULT_CONTROL_PIPE_ID;
         let tr_ptr = self.alloc_transfer_ring(ep0, 32)?.ptr_as_u64();
         let slot_ctx = unsafe { self.input_context.as_mut().unwrap() }.enable_slot_context();
+        debug!(
+            "Setting ep0 = {}, port = {}",
+            ep0.address(),
+            port.port_num()
+        );
         let ep0_ctx = unsafe { self.input_context.as_mut().unwrap() }.enable_endpoint(ep0);
 
         slot_ctx.set_route_string(0);
@@ -310,8 +309,7 @@ impl UsbDevice {
                 let driver = *driver;
                 driver
                     .on_interrupt_completed(endpoint_id, len)
-                    .map_err(ErrorType::ClassDriverError)
-                    .map_err(|e| make_error!(e))?;
+                    .map_err(|e| make_error!(ErrorType::ClassDriverError(e)))?;
                 self.interrupt_in(
                     driver.endpoint_interrupt_in(),
                     driver.buffer(),
@@ -402,12 +400,10 @@ impl UsbDevice {
                                 let conf = EndpointConfig::from(&ep_desc);
                                 self.class_drivers
                                     .insert(conf.endpoint_id.number(), class_driver)
-                                    .map_err(ErrorType::ArrayMapError)
-                                    .map_err(|e| make_error!(e))?;
+                                    .map_err(|e| make_error!(ErrorType::ArrayMapError(e)))?;
                                 self.ep_configs
                                     .push(conf)
-                                    .map_err(ErrorType::ArrayVecError)
-                                    .map_err(|e| make_error!(e))?;
+                                    .map_err(|e| make_error!(ErrorType::ArrayVecError(e)))?;
                             }
                             Some(DescriptorType::Hid(_)) => {
                                 // noop
@@ -491,8 +487,7 @@ impl UsbDevice {
         if let Some(driver) = issuer {
             self.event_waiters
                 .insert(setup_data, driver)
-                .map_err(ErrorType::ArrayMapError)
-                .map_err(|e| make_error!(e))?;
+                .map_err(|e| make_error!(ErrorType::ArrayMapError(e)))?;
         }
 
         if EndpointNumber::MAX_ENDPOINT < endpoint_id.number() {
@@ -518,8 +513,7 @@ impl UsbDevice {
 
                 self.setup_stage_map
                     .insert(data_stage_ptr, setup_stage_ptr as *const SetupStageTrb)
-                    .map_err(ErrorType::ArrayMapError)
-                    .map_err(|e| make_error!(e))?;
+                    .map_err(|e| make_error!(ErrorType::ArrayMapError(e)))?;
             }
             None => {
                 let setup_stage_ptr = tr.push(
@@ -534,8 +528,7 @@ impl UsbDevice {
                 );
                 self.setup_stage_map
                     .insert(status_trb_ptr, setup_stage_ptr as *const SetupStageTrb)
-                    .map_err(ErrorType::ArrayMapError)
-                    .map_err(|e| make_error!(e))?;
+                    .map_err(|e| make_error!(ErrorType::ArrayMapError(e)))?;
             }
         }
 
@@ -637,16 +630,36 @@ impl UsbDevice {
     ) -> Result<&mut Ring> {
         let mut ring = Ring::new();
         ring.initialize(buf_size)
-            .map_err(ErrorType::TrbError)
-            .map_err(|e| make_error!(e))?;
+            .map_err(|e| make_error!(ErrorType::TrbError(e)))?;
 
         self.transfer_rings
             .insert(endpoint_id, ring)
-            .map_err(ErrorType::ArrayMapError)
-            .map_err(|e| make_error!(e))?;
+            .map_err(|e| make_error!(ErrorType::ArrayMapError(e)))?;
         Ok(self
             .transfer_rings
             .get_mut(&endpoint_id)
             .expect("Existence is guaranteed here"))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::usb::context::InputContext;
+    use crate::usb::mem::{allocate_array, free_all};
+
+    #[test]
+    fn enable_slot_context() {
+        free_all();
+
+        let input_context_ptr = allocate_array::<InputContext>(1, Some(64), Some(4096)).unwrap();
+        let input_context = unsafe { input_context_ptr.as_mut().unwrap() };
+        input_context.slot_context.set_root_hub_port_num(42);
+
+        assert_eq!(
+            unsafe { input_context_ptr.read() }
+                .slot_context
+                .root_hub_port_num(),
+            42
+        );
     }
 }
