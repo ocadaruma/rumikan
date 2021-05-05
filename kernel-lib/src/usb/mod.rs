@@ -8,7 +8,7 @@ mod endpoint;
 mod mem;
 mod port;
 mod ring;
-mod xhc;
+mod xhci;
 
 use crate::error::ErrorContext;
 use crate::usb::devmgr::DeviceManager;
@@ -17,7 +17,7 @@ use crate::usb::ring::{
     AddressDeviceCommandTrb, CommandCompletionEventTrb, ConfigureEndpointCommandTrb,
     EnableSlotCommandTrb, EventRing, PortStatusChangeEventTrb, Ring, TransferEventTrb, TrbType,
 };
-use crate::usb::xhc::{ExtendedCapability, Registers};
+use crate::usb::xhci::{ExtendedCapability, Registers};
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub struct SlotId(u8);

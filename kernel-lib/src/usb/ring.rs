@@ -2,7 +2,7 @@ use crate::error::ErrorContext;
 use crate::usb::endpoint::EndpointId;
 use crate::usb::mem::allocate_array;
 use crate::usb::ring::TrbType::Unsupported;
-use crate::usb::xhc::{Accessor, InterrupterRegisterSet};
+use crate::usb::xhci::{Accessor, InterrupterRegisterSet};
 use crate::usb::SlotId;
 use bit_field::BitField;
 use core::mem::transmute;

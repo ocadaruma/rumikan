@@ -1,5 +1,5 @@
 use crate::usb::endpoint::EndpointType;
-use crate::usb::xhc::{Accessor, PortRegisterSet};
+use crate::usb::xhci::{Accessor, PortRegisterSet};
 use core::convert::TryFrom;
 
 #[repr(u8)]

@@ -11,7 +11,7 @@ use crate::usb::ring::{
     DataStageTrb, NormalTrb, RequestType, Ring, SetupData, SetupStageTrb, StatusStageTrb,
     TransferEventTrb, Trb, TrbType,
 };
-use crate::usb::xhc::{Accessor, DoorbellRegister};
+use crate::usb::xhci::{Accessor, DoorbellRegister};
 use crate::usb::SlotId;
 use crate::util::{ArrayMap, ArrayVec};
 use core::mem::size_of;
