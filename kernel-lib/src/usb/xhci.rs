@@ -403,7 +403,7 @@ impl Iterator for IterMutExt {
     type Item = ExtendedCapability;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.0 == null_mut() {
+        if self.0.is_null() {
             None
         } else {
             let reg = unsafe { &*self.0 };

@@ -50,29 +50,27 @@ impl ClassDriver {
     }
 
     pub fn on_interrupt_completed(&self, ep_id: EndpointId, len: u32) -> Result<()> {
-        match self {
-            &ClassDriver::HidMouse(driver) => {
-                unsafe { &*driver }.on_interrupt_completed(ep_id, len)
-            }
+        match *self {
+            ClassDriver::HidMouse(driver) => unsafe { &*driver }.on_interrupt_completed(ep_id, len),
         }
         Ok(())
     }
 
     pub fn set_endpoint(&mut self, config: &EndpointConfig) {
-        match self {
-            &mut ClassDriver::HidMouse(driver) => unsafe { &mut *driver }.set_endpoint(config),
+        match *self {
+            ClassDriver::HidMouse(driver) => unsafe { &mut *driver }.set_endpoint(config),
         }
     }
 
     pub fn interface_index(&self) -> u8 {
-        match self {
-            &ClassDriver::HidMouse(driver) => unsafe { &*driver }.interface_index,
+        match *self {
+            ClassDriver::HidMouse(driver) => unsafe { &*driver }.interface_index,
         }
     }
 
     pub fn buffer(&self) -> *const () {
-        match self {
-            &ClassDriver::HidMouse(driver) => unsafe { &*driver }.buf,
+        match *self {
+            ClassDriver::HidMouse(driver) => unsafe { &*driver }.buf,
         }
     }
 
@@ -83,8 +81,8 @@ impl ClassDriver {
     }
 
     pub fn endpoint_interrupt_in(&self) -> EndpointId {
-        match self {
-            &ClassDriver::HidMouse(driver) => unsafe { &*driver }.endpoint_interrupt_in,
+        match *self {
+            ClassDriver::HidMouse(driver) => unsafe { &*driver }.endpoint_interrupt_in,
         }
     }
 }

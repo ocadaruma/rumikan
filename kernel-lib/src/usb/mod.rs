@@ -236,7 +236,7 @@ impl Xhc {
             .registers
             .doorbell
             .at(slot_id.value() as usize)
-            .ok_or(make_error!(ErrorType::InvalidSlotId))?;
+            .ok_or_else(|| make_error!(ErrorType::InvalidSlotId))?;
         self.device_manager
             .allocate_device(slot_id, dbreg)
             .map_err(|e| make_error!(ErrorType::DeviceError(e)))?;

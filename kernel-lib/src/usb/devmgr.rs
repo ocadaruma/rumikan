@@ -407,8 +407,8 @@ impl UsbDevice {
                         _ => {}
                     }
                 }
+                break;
             }
-            break;
         }
         if !class_driver_found {
             return Ok(());
