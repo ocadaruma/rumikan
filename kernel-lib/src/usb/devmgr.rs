@@ -1,6 +1,6 @@
 use crate::error::ErrorContext;
 use crate::usb::classdriver::ClassDriver;
-use crate::usb::context::{DeviceContext, InputContext};
+use crate::usb::context::{DeviceContext, InputContext, InputControlContext};
 use crate::usb::descriptor::{
     ConfigurationDescriptor, Descriptor, DescriptorType, DeviceDescriptor,
 };
@@ -164,11 +164,6 @@ impl UsbDevice {
         let ep0 = EndpointId::DEFAULT_CONTROL_PIPE_ID;
         let tr_ptr = self.alloc_transfer_ring(ep0, 32)?.ptr_as_u64();
         let slot_ctx = unsafe { self.input_context.as_mut().unwrap() }.enable_slot_context();
-        debug!(
-            "Setting ep0 = {}, port = {}",
-            ep0.address(),
-            port.port_num()
-        );
         let ep0_ctx = unsafe { self.input_context.as_mut().unwrap() }.enable_endpoint(ep0);
 
         slot_ctx.set_route_string(0);
@@ -194,11 +189,12 @@ impl UsbDevice {
     }
 
     pub fn configure_endpoints(&mut self, port: Port) -> Result<()> {
-        let slot_ctx = unsafe {
-            self.input_context.as_mut().unwrap().slot_context =
-                self.device_context.as_ref().unwrap().slot_context;
-            self.input_context.as_mut().unwrap().enable_slot_context()
-        };
+        let input_ctx = unsafe { &mut *self.input_context };
+        let device_ctx = unsafe { &mut *self.device_context };
+
+        input_ctx.input_control_context = InputControlContext::default();
+        input_ctx.slot_context = device_ctx.slot_context;
+        let slot_ctx = input_ctx.enable_slot_context();
 
         slot_ctx.set_context_entries(EndpointId::MAX);
         let port_speed = port
@@ -208,12 +204,8 @@ impl UsbDevice {
         for i in 0..self.ep_configs.len() {
             let ep_config = self.ep_configs[i];
 
-            let ep_ctx = unsafe {
-                self.input_context
-                    .as_mut()
-                    .unwrap()
-                    .enable_endpoint(ep_config.endpoint_id)
-            };
+            input_ctx.enable_endpoint(ep_config.endpoint_id);
+            let ep_ctx = input_ctx.enable_endpoint(ep_config.endpoint_id);
             match ep_config.endpoint_type {
                 EndpointType::Control => ep_ctx.set_endpoint_type(4),
                 EndpointType::Isochronous => {
@@ -261,8 +253,8 @@ impl UsbDevice {
             return Err(make_error!(ErrorType::NoCorrespondingSetupStage));
         };
 
-        let setup_data = SetupData::from_trb(unsafe { setup_stage_trb.read() });
-        match unsafe { trb.trb_pointer().read() }.specialize() {
+        let setup_data = SetupData::from_trb(unsafe { &*setup_stage_trb });
+        match unsafe { *trb.trb_pointer() }.specialize() {
             TrbType::DataStage(data_stage_trb) => {
                 let transfer_length = data_stage_trb.trb_transfer_length() - residual_length;
                 self.on_control_completed(
@@ -393,30 +385,30 @@ impl UsbDevice {
         let mut iter = desc.iter(len as usize);
 
         let mut class_driver_found = false;
-        while let Some(desc_type) = iter.next() {
-            if let DescriptorType::Interface(interface_desc) = desc_type {
-                if let Some(class_driver) = ClassDriver::new(&interface_desc) {
-                    class_driver_found = true;
-                    for _ in 0..interface_desc.num_endpoints() {
-                        match iter.next() {
-                            Some(DescriptorType::Endpoint(ep_desc)) => {
-                                let conf = EndpointConfig::from(&ep_desc);
-                                self.class_drivers
-                                    .insert(conf.endpoint_id.number(), class_driver)
-                                    .map_err(|e| make_error!(ErrorType::ArrayMapError(e)))?;
-                                self.ep_configs
-                                    .push(conf)
-                                    .map_err(|e| make_error!(ErrorType::ArrayVecError(e)))?;
-                            }
-                            Some(DescriptorType::Hid(_)) => {
-                                // noop
-                            }
-                            _ => {}
+        while let Some(DescriptorType::Interface(interface_desc)) = iter.next() {
+            if let Some(class_driver) = ClassDriver::new(&interface_desc) {
+                class_driver_found = true;
+                let mut num_endpoints = 0;
+                while num_endpoints < interface_desc.num_endpoints() {
+                    match iter.next() {
+                        Some(DescriptorType::Endpoint(ep_desc)) => {
+                            num_endpoints += 1;
+                            let conf = EndpointConfig::from(&ep_desc);
+                            self.class_drivers
+                                .insert(conf.endpoint_id.number(), class_driver)
+                                .map_err(|e| make_error!(ErrorType::ArrayMapError(e)))?;
+                            self.ep_configs
+                                .push(conf)
+                                .map_err(|e| make_error!(ErrorType::ArrayVecError(e)))?;
                         }
+                        Some(DescriptorType::Hid(_)) => {
+                            // noop
+                        }
+                        _ => {}
                     }
                 }
-                break;
             }
+            break;
         }
         if !class_driver_found {
             return Ok(());
@@ -596,7 +588,6 @@ impl UsbDevice {
                     .map_err(|e| make_error!(e))?;
             }
         }
-
         self.ring_doorbell(endpoint_id);
         Ok(())
     }
@@ -609,7 +600,7 @@ impl UsbDevice {
         };
 
         let normal_trb = NormalTrb::new()
-            .set_pointer(&buf)
+            .set_pointer(buf as u64)
             .set_transfer_length(len)
             .set_interrupt_on_short_packet(true)
             .set_interrupt_on_completion(true);

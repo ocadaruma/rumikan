@@ -5,30 +5,23 @@ use core::convert::TryFrom;
 
 #[repr(transparent)]
 #[derive(Debug, Default, Copy, Clone)]
-pub struct SlotContext([u32; 8]);
+pub struct SlotContext {
+    data: [u32; 8],
+}
 impl SlotContext {
-    pub fn root_hub_port_num(&self) -> u8 {
-        self.0[1].get_bits(16..24) as u8
-    }
-
-    pub fn set_root_hub_port_num(&mut self, num: u8) {
-        self.0[1].set_bits(16..24, num as u32);
-    }
-
-    pub fn set_route_string(&mut self, s: u32) {
-        self.0[0].set_bits(0..20, s as u32);
-    }
+    getbits!(pub root_hub_port_num: u8; data[1]; 16; 8);
+    setbits!(pub set_root_hub_port_num: u8; data[1]; 16; 8);
+    setbits!(pub set_route_string: u32; data[0]; 0; 20);
+    getbits!(_speed: u8; data[0]; 20; 4);
+    setbits!(_set_speed: u8; data[0]; 20; 4);
+    setbits!(pub set_context_entries: u8; data[0]; 27; 5);
 
     pub fn speed(&self) -> Result<PortSpeed, ()> {
-        PortSpeed::try_from(self.0[0].get_bits(20..24) as u8)
+        PortSpeed::try_from(self._speed())
     }
 
     pub fn set_speed(&mut self, s: PortSpeed) {
-        self.0[0].set_bits(20..24, s as u32);
-    }
-
-    pub fn set_context_entries(&mut self, entries: u8) {
-        self.0[0].set_bits(27..32, entries as u32);
+        self._set_speed(s as u8);
     }
 }
 
@@ -105,7 +98,7 @@ pub struct InputControlContext {
 #[repr(C)]
 #[derive(Debug, Default)]
 pub struct InputContext {
-    input_control_context: InputControlContext,
+    pub input_control_context: InputControlContext,
     pub slot_context: SlotContext,
     endpoint_contexts: [EndpointContext; 31],
 }

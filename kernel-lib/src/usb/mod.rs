@@ -141,7 +141,11 @@ impl Xhc {
 
     fn on_transfer_event(&mut self, trb: TransferEventTrb) -> Result<()> {
         let slot_id = trb.slot_id();
-        debug!("TransferEvent: slot_id = {}", slot_id.value());
+        debug!(
+            "TransferEvent: slot_id = {}, issuer = {:?}",
+            trb.slot_id().value(),
+            unsafe { trb.trb_pointer().read() }.specialize()
+        );
 
         let dev = self
             .device_manager
@@ -189,6 +193,7 @@ impl Xhc {
                 if self.addressing_port == Some(port_id)
                     && self.port_config_phase[port_id as usize] == ConfigPhase::AddressingDevice
                 {
+                    self.addressing_port = None;
                     for i in 0..self.port_config_phase.len() {
                         if self.port_config_phase[i] == ConfigPhase::WaitingAddressed {
                             let mut port = self.port_at(i as u8);
@@ -226,12 +231,6 @@ impl Xhc {
     }
 
     fn address_device(&mut self, port_id: u8, slot_id: SlotId) -> Result<()> {
-        debug!(
-            "AddressDevice: port_id = {}, slot_id = {}",
-            port_id,
-            slot_id.value()
-        );
-
         let port = self.port_at(port_id);
         let dbreg = self
             .registers
@@ -255,11 +254,6 @@ impl Xhc {
         self.command_ring.push(cmd.data());
         self.registers.doorbell.at(0).unwrap().as_mut().ring(0, 0);
 
-        debug!(
-            "Issued AddressDevice: port_id = {}, slot_id = {}",
-            port_id,
-            slot_id.value()
-        );
         Ok(())
     }
 
@@ -315,14 +309,12 @@ impl Xhc {
     fn reset_port(&mut self, port: &mut Port) -> Result<()> {
         if port.is_connected() {
             match self.addressing_port {
-                Some(addressing_port) => {
-                    debug!("Setting port to waiting. port: {}", addressing_port);
+                Some(_) => {
                     self.port_config_phase[port.port_num() as usize] =
                         ConfigPhase::WaitingAddressed;
                 }
                 None => match self.port_config_phase[port.port_num() as usize] {
                     ConfigPhase::NotConnected | ConfigPhase::WaitingAddressed => {
-                        debug!("Setting port to resetting. port: {}", port.port_num());
                         self.addressing_port = Some(port.port_num());
                         self.port_config_phase[port.port_num() as usize] =
                             ConfigPhase::ResettingPort;

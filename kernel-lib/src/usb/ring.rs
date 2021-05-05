@@ -20,8 +20,8 @@ pub enum ErrorType {
 pub struct Trb([u32; 4]);
 
 impl Trb {
-    getbit!(pub cycle_bit, 0[3]; 0);
-    setbit!(pub set_cycle_bit, 0[3]; 0);
+    getbit!(pub cycle_bit; 0[3]; 0);
+    setbit!(pub set_cycle_bit; 0[3]; 0);
 
     pub fn new(n: u128) -> Self {
         let mut data = [0u32; 4];
@@ -56,7 +56,6 @@ impl Trb {
             ConfigureEndpointCommandTrb::TYPE => {
                 TrbType::ConfigureEndpointCommand(ConfigureEndpointCommandTrb(data))
             }
-            NoOpCommandTrb::TYPE => TrbType::NoOpCommand(NoOpCommandTrb(data)),
             PortStatusChangeEventTrb::TYPE => {
                 TrbType::PortStatusChangeEvent(PortStatusChangeEventTrb(data))
             }
@@ -86,7 +85,7 @@ impl TransferEventTrb {
     }
 
     pub fn trb_pointer(&self) -> *const Trb {
-        unsafe { transmute(self.0.get_bits(0..64) as u64) }
+        (self.0.get_bits(0..64) as u64) as *const Trb
     }
 
     pub fn endpoint_id(&self) -> EndpointId {
@@ -101,7 +100,7 @@ impl CommandCompletionEventTrb {
     pub const TYPE: u8 = 33;
 
     pub fn trb_pointer(&self) -> *const Trb {
-        unsafe { transmute((self.0.get_bits(4..64) << 4) as u64) }
+        ((self.0.get_bits(4..64) << 4) as u64) as *const Trb
     }
 
     pub fn slot_id(&self) -> SlotId {
@@ -183,25 +182,6 @@ impl ConfigureEndpointCommandTrb {
 
 #[derive(Debug)]
 #[repr(transparent)]
-pub struct NoOpCommandTrb(u128);
-
-#[allow(dead_code)]
-impl NoOpCommandTrb {
-    pub const TYPE: u8 = 23;
-
-    pub fn new() -> Self {
-        let mut bits = 0u128;
-        bits.set_bits(106..112, Self::TYPE as u128);
-        Self(bits)
-    }
-
-    pub fn data(&self) -> u128 {
-        self.0
-    }
-}
-
-#[derive(Debug)]
-#[repr(transparent)]
 pub struct LinkTrb(u128);
 impl LinkTrb {
     pub const TYPE: u8 = 6;
@@ -241,8 +221,8 @@ impl NormalTrb {
         self
     }
 
-    pub fn set_pointer(mut self, ptr: &*const ()) -> Self {
-        self.0.set_bits(0..64, *ptr as u128);
+    pub fn set_pointer(mut self, ptr: u64) -> Self {
+        self.0.set_bits(0..64, ptr as u128);
         self
     }
 
@@ -389,7 +369,7 @@ impl SetupData {
         Self(0)
     }
 
-    pub fn from_trb(setup_stage_trb: SetupStageTrb) -> Self {
+    pub fn from_trb(setup_stage_trb: &SetupStageTrb) -> Self {
         Self::new()
             .set_request_type(RequestType(setup_stage_trb.request_type()))
             .set_request(setup_stage_trb.request())
@@ -484,7 +464,6 @@ pub enum TrbType {
     TransferEvent(TransferEventTrb),
     CommandCompletionEvent(CommandCompletionEventTrb),
     ConfigureEndpointCommand(ConfigureEndpointCommandTrb),
-    NoOpCommand(NoOpCommandTrb),
     EnableSlotCommand(EnableSlotCommandTrb),
     AddressDeviceCommand(AddressDeviceCommandTrb),
     PortStatusChangeEvent(PortStatusChangeEventTrb),

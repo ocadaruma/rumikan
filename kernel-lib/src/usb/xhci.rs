@@ -66,8 +66,8 @@ pub struct HCSPARAMS1 {
     data: u32,
 }
 impl HCSPARAMS1 {
-    getbits!(pub max_device_slots, data; 0; 8; u8);
-    getbits!(pub max_ports, data; 24; 8; u8);
+    getbits!(pub max_device_slots: u8; data; 0; 8);
+    getbits!(pub max_ports: u8; data; 24; 8);
 }
 
 #[derive(Debug)]
@@ -88,7 +88,7 @@ pub struct HCCPARAMS1 {
     data: u32,
 }
 impl HCCPARAMS1 {
-    getbits!(pub xhci_extended_capabilities_pointer, data; 16; 16; u16);
+    getbits!(pub xhci_extended_capabilities_pointer: u16; data; 16; 16);
 }
 
 #[derive(Debug)]
@@ -103,7 +103,7 @@ pub struct DBOFF {
     data: u32,
 }
 impl DBOFF {
-    getbits!(pub offset, data; 2; 30; u32);
+    getbits!(pub offset: u32; data; 2; 30);
 
     pub fn doorbell_array_offset(&self) -> u32 {
         self.offset() << 2
@@ -116,7 +116,7 @@ pub struct RTSOFF {
     data: u32,
 }
 impl RTSOFF {
-    getbits!(pub offset, data; 5; 27; u32);
+    getbits!(pub offset: u32; data; 5; 27);
 
     pub fn runtime_register_space_offset(&self) -> u32 {
         self.offset() << 5
@@ -144,12 +144,12 @@ pub struct USBCMD {
     data: u32,
 }
 impl USBCMD {
-    setbit!(pub set_run_stop, data; 0);
-    getbit!(pub host_controller_reset, data; 1);
-    setbit!(pub set_host_controller_reset, data; 1);
-    setbit!(pub set_interrupter_enable, data; 2);
-    setbit!(pub set_host_system_error_enable, data; 3);
-    setbit!(pub set_enable_wrap_event, data; 10);
+    setbit!(pub set_run_stop; data; 0);
+    getbit!(pub host_controller_reset; data; 1);
+    setbit!(pub set_host_controller_reset; data; 1);
+    setbit!(pub set_interrupter_enable; data; 2);
+    setbit!(pub set_host_system_error_enable; data; 3);
+    setbit!(pub set_enable_wrap_event; data; 10);
 }
 
 #[derive(Debug)]
@@ -158,8 +158,8 @@ pub struct USBSTS {
     data: u32,
 }
 impl USBSTS {
-    getbit!(pub host_controller_halted, data; 0);
-    getbit!(pub controller_not_ready, data; 11);
+    getbit!(pub host_controller_halted; data; 0);
+    getbit!(pub controller_not_ready; data; 11);
 }
 
 #[derive(Debug)]
@@ -168,10 +168,10 @@ pub struct CRCR {
     data: u64,
 }
 impl CRCR {
-    setbit!(pub set_ring_cycle_state, data; 0);
-    setbit!(pub set_command_stop, data; 1);
-    setbit!(pub set_command_abort, data; 2);
-    setbits!(set_pointer, data; 6; 58; u64);
+    setbit!(pub set_ring_cycle_state; data; 0);
+    setbit!(pub set_command_stop; data; 1);
+    setbit!(pub set_command_abort; data; 2);
+    setbits!(set_pointer: u64; data; 6; 58);
 
     pub fn set_command_ring_pointer(&mut self, ptr: u64) {
         self.set_pointer(ptr >> 6);
@@ -184,7 +184,7 @@ pub struct DCBAAP {
     data: u64,
 }
 impl DCBAAP {
-    setbits!(set_pointer, data; 6; 58; u64);
+    setbits!(set_pointer: u64; data; 6; 58);
 
     pub fn set_device_context_base_address_array_pointer(&mut self, ptr: u64) {
         self.set_pointer(ptr >> 6);
@@ -197,7 +197,7 @@ pub struct CONFIG {
     data: u32,
 }
 impl CONFIG {
-    setbits!(pub set_max_device_slots_enabled, data; 0; 8; u8);
+    setbits!(pub set_max_device_slots_enabled: u8; data; 0; 8);
 }
 
 #[repr(C)]
@@ -220,12 +220,12 @@ pub struct PORTSC {
     data: u32,
 }
 impl PORTSC {
-    getbit!(pub current_connect_status, data; 0);
-    getbit!(pub port_enabled_disabled, data; 1);
-    getbit!(pub port_reset, data; 4);
-    getbits!(pub port_speed, data; 10; 4; u8);
-    getbit!(pub port_reset_change, data; 21);
-    setbit!(set_port_reset_change, data; 21);
+    getbit!(pub current_connect_status; data; 0);
+    getbit!(pub port_enabled_disabled; data; 1);
+    getbit!(pub port_reset; data; 4);
+    getbits!(pub port_speed: u8; data; 10; 4);
+    getbit!(pub port_reset_change; data; 21);
+    setbit!(set_port_reset_change; data; 21);
 
     pub fn reset(&mut self) {
         self.data &= 0x0e00c3e0;
@@ -271,8 +271,8 @@ pub struct IMAN {
     data: u32,
 }
 impl IMAN {
-    setbit!(pub set_interrupt_pending, data; 0);
-    setbit!(pub set_interrupt_enable, data; 1);
+    setbit!(pub set_interrupt_pending; data; 0);
+    setbit!(pub set_interrupt_enable; data; 1);
 }
 
 #[derive(Debug)]
@@ -287,7 +287,7 @@ pub struct ERSTSZ {
     data: u32,
 }
 impl ERSTSZ {
-    setbits!(pub set_event_ring_segment_table_size, data; 0; 16; u16);
+    setbits!(pub set_event_ring_segment_table_size: u16; data; 0; 16);
 }
 
 #[derive(Debug)]
@@ -296,7 +296,7 @@ pub struct ERSTBA {
     data: u64,
 }
 impl ERSTBA {
-    setbits!(set_erstba, data; 6; 58; u64);
+    setbits!(set_erstba: u64; data; 6; 58);
 
     pub fn set_event_ring_segment_table_base_address(&mut self, ptr: u64) {
         self.set_erstba(ptr >> 6);
@@ -309,8 +309,8 @@ pub struct ERDP {
     data: u64,
 }
 impl ERDP {
-    getbits!(erdp, data; 4; 60; u64);
-    setbits!(set_erdp, data; 4; 60; u64);
+    getbits!(erdp: u64; data; 4; 60);
+    setbits!(set_erdp: u64; data; 4; 60);
 
     pub fn event_ring_dequeue_pointer(&self) -> u64 {
         self.erdp() << 4
@@ -338,8 +338,8 @@ pub struct Doorbell {
     data: u32,
 }
 impl Doorbell {
-    setbits!(pub set_db_target, data; 0; 8; u8);
-    setbits!(pub set_db_stream_id, data; 16; 16; u16);
+    setbits!(pub set_db_target: u8; data; 0; 8);
+    setbits!(pub set_db_stream_id: u16; data; 16; 16);
 }
 
 #[repr(C)]
@@ -362,8 +362,8 @@ pub struct ExtendedRegister {
     data: u32,
 }
 impl ExtendedRegister {
-    getbits!(pub capability_id, data; 0; 8; u8);
-    getbits!(pub next_pointer, data; 8; 8; u8);
+    getbits!(pub capability_id: u8; data; 0; 8);
+    getbits!(pub next_pointer: u8; data; 8; 8);
 }
 
 #[derive(Debug)]
@@ -372,9 +372,9 @@ pub struct USBLEGSUP {
     data: u32,
 }
 impl USBLEGSUP {
-    getbit!(pub hc_bios_owned_semaphore, data; 16);
-    getbit!(pub hc_os_owned_semaphore, data; 24);
-    setbit!(pub set_hc_os_owned_semaphore, data; 24);
+    getbit!(pub hc_bios_owned_semaphore; data; 16);
+    getbit!(pub hc_os_owned_semaphore; data; 24);
+    setbit!(pub set_hc_os_owned_semaphore; data; 24);
 }
 
 #[derive(Debug)]
