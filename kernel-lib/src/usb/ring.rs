@@ -2,11 +2,10 @@ use crate::error::ErrorContext;
 use crate::usb::endpoint::EndpointId;
 use crate::usb::mem::allocate_array;
 use crate::usb::ring::TrbType::Unsupported;
-use crate::usb::{IdentityMapper, SlotId};
+use crate::usb::xhc::{Accessor, InterrupterRegisterSet};
+use crate::usb::SlotId;
 use bit_field::BitField;
 use core::mem::transmute;
-use xhci::accessor;
-use xhci::registers::InterruptRegisterSet;
 
 pub type Error = ErrorContext<ErrorType>;
 pub type Result<T> = core::result::Result<T, Error>;
@@ -18,33 +17,51 @@ pub enum ErrorType {
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash, Default)]
 #[repr(transparent)]
-pub struct Trb(u128);
+pub struct Trb([u32; 4]);
 
 impl Trb {
-    pub fn cycle_bit(&self) -> bool {
-        self.0.get_bit(96)
+    getbit!(pub cycle_bit, 0[3]; 0);
+    setbit!(pub set_cycle_bit, 0[3]; 0);
+
+    pub fn new(n: u128) -> Self {
+        let mut data = [0u32; 4];
+        data[0] = n.get_bits(0..32) as u32;
+        data[1] = n.get_bits(32..64) as u32;
+        data[2] = n.get_bits(64..96) as u32;
+        data[3] = n.get_bits(96..128) as u32;
+        Self(data)
+    }
+
+    pub fn trb_type(&self) -> u8 {
+        self.0[3].get_bits(10..16) as u8
     }
 
     pub fn specialize(&self) -> TrbType {
-        let n = self.0.get_bits(106..112) as u8;
+        let n = self.trb_type();
+        let mut data = 0u128;
+        data.set_bits(0..32, self.0[0] as u128);
+        data.set_bits(32..64, self.0[1] as u128);
+        data.set_bits(64..96, self.0[2] as u128);
+        data.set_bits(96..128, self.0[3] as u128);
         match n {
-            NormalTrb::TYPE => TrbType::Normal(NormalTrb(self.0)),
-            TransferEventTrb::TYPE => TrbType::TransferEvent(TransferEventTrb(self.0)),
+            NormalTrb::TYPE => TrbType::Normal(NormalTrb(data)),
+            TransferEventTrb::TYPE => TrbType::TransferEvent(TransferEventTrb(data)),
             CommandCompletionEventTrb::TYPE => {
-                TrbType::CommandCompletionEvent(CommandCompletionEventTrb(self.0))
+                TrbType::CommandCompletionEvent(CommandCompletionEventTrb(data))
             }
-            EnableSlotCommandTrb::TYPE => TrbType::EnableSlotCommand(EnableSlotCommandTrb(self.0)),
+            EnableSlotCommandTrb::TYPE => TrbType::EnableSlotCommand(EnableSlotCommandTrb(data)),
             AddressDeviceCommandTrb::TYPE => {
-                TrbType::AddressDeviceCommand(AddressDeviceCommandTrb(self.0))
+                TrbType::AddressDeviceCommand(AddressDeviceCommandTrb(data))
             }
             ConfigureEndpointCommandTrb::TYPE => {
-                TrbType::ConfigureEndpointCommand(ConfigureEndpointCommandTrb(self.0))
+                TrbType::ConfigureEndpointCommand(ConfigureEndpointCommandTrb(data))
             }
+            NoOpCommandTrb::TYPE => TrbType::NoOpCommand(NoOpCommandTrb(data)),
             PortStatusChangeEventTrb::TYPE => {
-                TrbType::PortStatusChangeEvent(PortStatusChangeEventTrb(self.0))
+                TrbType::PortStatusChangeEvent(PortStatusChangeEventTrb(data))
             }
-            DataStageTrb::TYPE => TrbType::DataStage(DataStageTrb(self.0)),
-            StatusStageTrb::TYPE => TrbType::StatusStage(StatusStageTrb(self.0)),
+            DataStageTrb::TYPE => TrbType::DataStage(DataStageTrb(data)),
+            StatusStageTrb::TYPE => TrbType::StatusStage(StatusStageTrb(data)),
             _ => Unsupported,
         }
     }
@@ -156,6 +173,25 @@ impl ConfigureEndpointCommandTrb {
         bits.set_bits(106..112, Self::TYPE as u128);
         bits.set_bits(4..64, (input_context_ptr >> 4) as u128);
         bits.set_bits(120..128, slot_id.value() as u128);
+        Self(bits)
+    }
+
+    pub fn data(&self) -> u128 {
+        self.0
+    }
+}
+
+#[derive(Debug)]
+#[repr(transparent)]
+pub struct NoOpCommandTrb(u128);
+
+#[allow(dead_code)]
+impl NoOpCommandTrb {
+    pub const TYPE: u8 = 23;
+
+    pub fn new() -> Self {
+        let mut bits = 0u128;
+        bits.set_bits(106..112, Self::TYPE as u128);
         Self(bits)
     }
 
@@ -448,6 +484,7 @@ pub enum TrbType {
     TransferEvent(TransferEventTrb),
     CommandCompletionEvent(CommandCompletionEventTrb),
     ConfigureEndpointCommand(ConfigureEndpointCommandTrb),
+    NoOpCommand(NoOpCommandTrb),
     EnableSlotCommand(EnableSlotCommandTrb),
     AddressDeviceCommand(AddressDeviceCommandTrb),
     PortStatusChangeEvent(PortStatusChangeEventTrb),
@@ -479,9 +516,8 @@ impl Ring {
         self.write_index = 0;
         self.len = len;
 
-        let ptr = allocate_array::<Trb>(len, Some(64), Some(64 * 1024))
+        self.buffer = allocate_array::<Trb>(len, Some(64), Some(64 * 1024))
             .map_err(|e| make_error!(ErrorType::AllocError(e)))?;
-        self.buffer = ptr;
         Ok(())
     }
 
@@ -507,13 +543,20 @@ impl Ring {
     }
 
     fn copy_to_last(&mut self, data: u128) {
-        let mut msb32 = data.get_bits(96..128) as u32;
-        msb32 = (msb32 & 0xfffffffe) | (self.cycle_bit as u32);
+        let mut trb = Trb::new(data);
+        trb.set_cycle_bit(self.cycle_bit);
 
-        let mut data = data;
-        data.set_bits(96..128, msb32 as u128);
+        for i in 0..3 {
+            unsafe {
+                (self.buffer.add(self.write_index) as *mut u32)
+                    .add(i)
+                    .write_volatile(trb.0[i]);
+            }
+        }
         unsafe {
-            self.buffer.add(self.write_index).write(Trb(data));
+            (self.buffer.add(self.write_index) as *mut u32)
+                .add(3)
+                .write_volatile(trb.0[3]);
         }
     }
 }
@@ -550,7 +593,7 @@ impl EventRingSegmentTableEntry {
 pub struct EventRing {
     buffer: *mut Trb,
     segment_table: *mut EventRingSegmentTableEntry,
-    interrupter: accessor::Single<InterruptRegisterSet, IdentityMapper>,
+    interrupter: Accessor<InterrupterRegisterSet>,
     len: usize,
     cycle_bit: bool,
 }
@@ -560,7 +603,7 @@ impl EventRing {
         EventRing {
             buffer: core::ptr::null_mut(),
             segment_table: core::ptr::null_mut(),
-            interrupter: unsafe { accessor::Single::new(0, IdentityMapper) },
+            interrupter: Accessor::null(),
             len: 0,
             cycle_bit: false,
         }
@@ -569,39 +612,50 @@ impl EventRing {
     pub fn initialize(
         &mut self,
         len: usize,
-        mut interrupter: accessor::Single<InterruptRegisterSet, IdentityMapper>,
+        interrupter: Accessor<InterrupterRegisterSet>,
     ) -> Result<()> {
+        self.interrupter = interrupter;
         self.cycle_bit = true;
         self.len = len;
 
-        let buffer_ptr = allocate_array::<Trb>(len, Some(64), Some(64 * 1024))
+        self.buffer = allocate_array::<Trb>(len, Some(64), Some(64 * 1024))
             .map_err(|e| make_error!(ErrorType::AllocError(e)))?;
 
-        let segment_table_ptr =
+        self.segment_table =
             allocate_array::<EventRingSegmentTableEntry>(1, Some(64), Some(64 * 1024))
                 .map_err(|e| make_error!(ErrorType::AllocError(e)))?;
         let mut table_entry = EventRingSegmentTableEntry::default();
         table_entry.set_ring_segment_size(len as u16);
-        table_entry.set_ring_segment_base_address(buffer_ptr as u64);
+        table_entry.set_ring_segment_base_address(self.buffer as u64);
 
         unsafe {
-            segment_table_ptr.write(table_entry);
+            self.segment_table.write_volatile(table_entry);
         }
 
-        interrupter.update(|i| {
-            i.erstsz.set(1);
-            i.erdp.set_event_ring_dequeue_pointer(buffer_ptr as u64);
-            i.erstba.set(segment_table_ptr as u64);
-        });
-        self.interrupter = interrupter;
+        let buffer_ptr = self.buffer as u64;
+        let segment_table_ptr = self.segment_table as u64;
+
+        let reg = self.interrupter.as_mut();
+        reg.erstsz
+            .update(|r| r.set_event_ring_segment_table_size(1));
+        reg.erdp
+            .update(|r| r.set_event_ring_dequeue_pointer(buffer_ptr));
+        reg.erstba
+            .update(|r| r.set_event_ring_segment_table_base_address(segment_table_ptr));
 
         Ok(())
     }
 
     pub fn peek_front(&self) -> Option<Trb> {
-        let ptr: *const Trb =
-            unsafe { transmute(self.interrupter.read().erdp.event_ring_dequeue_pointer()) };
-        let trb = unsafe { ptr.read() };
+        let trb = unsafe {
+            (self
+                .interrupter
+                .as_ref()
+                .erdp
+                .read()
+                .event_ring_dequeue_pointer() as *const Trb)
+                .read_volatile()
+        };
 
         if trb.cycle_bit() == self.cycle_bit {
             Some(trb)
@@ -611,12 +665,18 @@ impl EventRing {
     }
 
     pub fn pop(&mut self) {
-        let ptr: *const Trb =
-            unsafe { transmute(self.interrupter.read().erdp.event_ring_dequeue_pointer()) };
-        let mut ptr = unsafe { ptr.add(1) };
+        let mut ptr = unsafe {
+            (self
+                .interrupter
+                .as_ref()
+                .erdp
+                .read()
+                .event_ring_dequeue_pointer() as *const Trb)
+                .add(1)
+        };
 
         let segment_begin: *const Trb =
-            unsafe { transmute((self.segment_table.read()).ring_segment_base_address()) };
+            unsafe { (self.segment_table.read()).ring_segment_base_address() as *const Trb };
         let segment_end =
             unsafe { segment_begin.add((self.segment_table.read()).ring_segment_size() as usize) };
 
@@ -624,9 +684,8 @@ impl EventRing {
             ptr = segment_begin;
             self.cycle_bit = !self.cycle_bit;
         }
-
-        self.interrupter.update(|i| {
-            i.erdp.set_event_ring_dequeue_pointer(ptr as u64);
+        self.interrupter.as_mut().erdp.update(|r| {
+            r.set_event_ring_dequeue_pointer(ptr as u64);
         });
     }
 }

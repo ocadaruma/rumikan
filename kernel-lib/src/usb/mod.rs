@@ -1,3 +1,5 @@
+#[macro_use]
+mod bitfield;
 mod classdriver;
 mod context;
 mod descriptor;
@@ -6,6 +8,7 @@ mod endpoint;
 mod mem;
 mod port;
 mod ring;
+mod xhc;
 
 use crate::error::ErrorContext;
 use crate::usb::devmgr::DeviceManager;
@@ -14,9 +17,7 @@ use crate::usb::ring::{
     AddressDeviceCommandTrb, CommandCompletionEventTrb, ConfigureEndpointCommandTrb,
     EnableSlotCommandTrb, EventRing, PortStatusChangeEventTrb, Ring, TransferEventTrb, TrbType,
 };
-use core::num::NonZeroUsize;
-use xhci::accessor::Mapper;
-use xhci::{ExtendedCapability, Registers};
+use crate::usb::xhc::{ExtendedCapability, Registers};
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub struct SlotId(u8);
@@ -27,19 +28,6 @@ impl SlotId {
 
     pub fn value(&self) -> u8 {
         self.0
-    }
-}
-
-#[derive(Copy, Clone, Debug)]
-pub struct IdentityMapper;
-
-impl Mapper for IdentityMapper {
-    unsafe fn map(&mut self, phys_start: usize, _bytes: usize) -> NonZeroUsize {
-        NonZeroUsize::new_unchecked(phys_start)
-    }
-
-    fn unmap(&mut self, _virt_start: usize, _bytes: usize) {
-        // noop
     }
 }
 
@@ -55,8 +43,7 @@ pub type Error = ErrorContext<ErrorType>;
 pub type Result<T> = core::result::Result<T, Error>;
 
 pub struct Xhc {
-    registers: Registers<IdentityMapper>,
-    extended_capabilities: xhci::extended_capabilities::List<IdentityMapper>,
+    registers: Registers,
     device_manager: DeviceManager,
     command_ring: Ring,
     event_ring: EventRing,
@@ -66,19 +53,8 @@ pub struct Xhc {
 
 impl Xhc {
     pub fn new(mmio_base: usize) -> Xhc {
-        let mapper = IdentityMapper;
-        let registers = unsafe { Registers::new(mmio_base, mapper) };
-        let extended_capabilities = unsafe {
-            xhci::extended_capabilities::List::new(
-                mmio_base,
-                registers.capability.hccparams1.read(),
-                mapper,
-            )
-        }
-        .unwrap();
         Xhc {
-            registers,
-            extended_capabilities,
+            registers: Registers::new(mmio_base),
             device_manager: DeviceManager::new(),
             command_ring: Ring::default(),
             event_ring: EventRing::default(),
@@ -102,25 +78,37 @@ impl Xhc {
     }
 
     pub fn run(&mut self) {
-        self.registers.operational.usbcmd.update(|u| {
+        self.registers.operational.as_mut().usbcmd.update(|u| {
             u.set_run_stop(true);
         });
 
-        while self.registers.operational.usbsts.read().hc_halted() {}
+        while self
+            .registers
+            .operational
+            .as_ref()
+            .usbsts
+            .read()
+            .host_controller_halted()
+        {}
+        debug!("xHC started");
     }
 
     pub fn max_ports(&self) -> u8 {
         self.registers
             .capability
+            .as_ref()
             .hcsparams1
             .read()
-            .number_of_ports()
+            .max_ports()
     }
 
     pub fn port_at(&self, num: u8) -> Port {
         Port::new(
             num,
-            self.registers.port_register_set.single_at(num as usize - 1),
+            self.registers
+                .port_register_set
+                .at(num as usize - 1)
+                .unwrap(),
         )
     }
 
@@ -245,7 +233,11 @@ impl Xhc {
         );
 
         let port = self.port_at(port_id);
-        let dbreg = self.registers.doorbell.single_at(slot_id.value() as usize);
+        let dbreg = self
+            .registers
+            .doorbell
+            .at(slot_id.value() as usize)
+            .ok_or(make_error!(ErrorType::InvalidSlotId))?;
         self.device_manager
             .allocate_device(slot_id, dbreg)
             .map_err(|e| make_error!(ErrorType::DeviceError(e)))?;
@@ -261,10 +253,7 @@ impl Xhc {
         let cmd = AddressDeviceCommandTrb::new(slot_id, dev.input_context_ptr());
 
         self.command_ring.push(cmd.data());
-        self.registers.doorbell.update_at(0, |d| {
-            d.set_doorbell_target(0);
-            d.set_doorbell_stream_id(0);
-        });
+        self.registers.doorbell.at(0).unwrap().as_mut().ring(0, 0);
 
         debug!(
             "Issued AddressDevice: port_id = {}, slot_id = {}",
@@ -307,10 +296,7 @@ impl Xhc {
         let cmd = ConfigureEndpointCommandTrb::new(slot_id, input_context_ptr);
 
         self.command_ring.push(cmd.data());
-        self.registers.doorbell.update_at(0, |d| {
-            d.set_doorbell_target(0);
-            d.set_doorbell_stream_id(0);
-        });
+        self.registers.doorbell.at(0).unwrap().as_mut().ring(0, 0);
 
         Ok(())
     }
@@ -322,11 +308,7 @@ impl Xhc {
 
             let trb = EnableSlotCommandTrb::default();
             self.command_ring.push(trb.data());
-
-            self.registers.doorbell.update_at(0, |d| {
-                d.set_doorbell_target(0);
-                d.set_doorbell_stream_id(0);
-            });
+            self.registers.doorbell.at(0).unwrap().as_mut().ring(0, 0);
         }
     }
 
@@ -354,61 +336,71 @@ impl Xhc {
     }
 
     fn request_hc_ownership(&mut self) {
-        for cap in self.extended_capabilities.into_iter().flatten() {
-            if let ExtendedCapability::UsbLegacySupportCapability(mut u) = cap {
-                u.update(|s| s.set_hc_os_owned_semaphore(true));
-
-                while u.read().hc_bios_owned_semaphore() || !u.read().hc_os_owned_semaphore() {}
+        if let Some(list) = self.registers.extended_register_list {
+            for cap in list {
+                match cap {
+                    ExtendedCapability::UsbLegacySupport(mut reg) => {
+                        let reg = reg.as_mut();
+                        reg.update(|r| r.set_hc_os_owned_semaphore(true));
+                        while reg.read().hc_bios_owned_semaphore()
+                            || !reg.read().hc_os_owned_semaphore()
+                        {}
+                    }
+                    _ => {
+                        debug!("Unsupported extended capability");
+                    }
+                }
             }
         }
+        debug!("Done requesting HC ownership");
     }
 
     fn initialize_host_controller(&mut self) {
-        self.registers
-            .operational
-            .usbcmd
-            .update(|u| u.set_run_stop(false));
-        while !self.registers.operational.usbsts.read().hc_halted() {}
+        let operational = self.registers.operational.as_mut();
+        let hc_halted = operational.usbsts.read().host_controller_halted();
+        operational.usbcmd.update(|u| {
+            u.set_interrupter_enable(false);
+            u.set_host_system_error_enable(false);
+            u.set_enable_wrap_event(false);
+            if !hc_halted {
+                u.set_run_stop(false);
+            }
+        });
+        while !operational.usbsts.read().host_controller_halted() {}
 
-        self.registers
-            .operational
+        operational
             .usbcmd
             .update(|u| u.set_host_controller_reset(true));
-        while self
-            .registers
-            .operational
-            .usbcmd
-            .read()
-            .host_controller_reset()
-        {}
-        while self
-            .registers
-            .operational
-            .usbsts
-            .read()
-            .controller_not_ready()
-        {}
+        while operational.usbcmd.read().host_controller_reset() {}
+        while operational.usbsts.read().controller_not_ready() {}
     }
 
     fn set_enabled_device_slots(&mut self) {
         let num_device_slots = self
             .registers
             .capability
+            .as_ref()
             .hcsparams1
             .read()
-            .number_of_device_slots();
+            .max_device_slots();
         debug!("Max device slots: {}", num_device_slots);
 
         let max_slots = self.device_manager.max_slots() as u8;
         self.registers
             .operational
+            .as_mut()
             .config
             .update(|c| c.set_max_device_slots_enabled(max_slots));
     }
 
     fn set_dcbaap(&mut self) {
         let ptr = self.device_manager.dcbaa_ptr();
-        self.registers.operational.dcbaap.update(|d| d.set(ptr));
+        debug!("DCBAA ptr: 0x{:x}", ptr);
+        self.registers
+            .operational
+            .as_mut()
+            .dcbaap
+            .update(|d| d.set_device_context_base_address_array_pointer(ptr));
     }
 
     fn init_command_ring(&mut self) {
@@ -416,7 +408,7 @@ impl Xhc {
             .initialize(32)
             .expect("Failed to initialize command ring");
         let ptr = self.command_ring.ptr_as_u64();
-        self.registers.operational.crcr.update(|c| {
+        self.registers.operational.as_mut().crcr.update(|c| {
             c.set_ring_cycle_state(true);
             c.set_command_stop(false);
             c.set_command_abort(false);
@@ -426,19 +418,23 @@ impl Xhc {
 
     fn init_event_ring(&mut self) {
         self.event_ring
-            .initialize(32, self.registers.interrupt_register_set.single_at(0))
+            .initialize(32, self.registers.interrupter_register_set.at(0).unwrap())
             .expect("Failed to initialize event ring");
     }
 
     fn init_interrupter(&mut self) {
         self.registers
-            .interrupt_register_set
-            .update_at(0, |primary_interrupter| {
-                primary_interrupter.iman.set_interrupt_pending(true);
-                primary_interrupter.iman.set_interrupt_enable(true);
+            .interrupter_register_set
+            .at(0)
+            .unwrap()
+            .as_mut()
+            .iman
+            .update(|iman| {
+                iman.set_interrupt_pending(true);
+                iman.set_interrupt_enable(true);
             });
 
-        self.registers.operational.usbcmd.update(|u| {
+        self.registers.operational.as_mut().usbcmd.update(|u| {
             u.set_interrupter_enable(true);
         });
     }

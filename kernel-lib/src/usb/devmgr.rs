@@ -11,7 +11,8 @@ use crate::usb::ring::{
     DataStageTrb, NormalTrb, RequestType, Ring, SetupData, SetupStageTrb, StatusStageTrb,
     TransferEventTrb, Trb, TrbType,
 };
-use crate::usb::{IdentityMapper, SlotId};
+use crate::usb::xhc::{Accessor, DoorbellRegister};
+use crate::usb::SlotId;
 use crate::util::{ArrayMap, ArrayVec};
 use core::mem::size_of;
 use core::ptr::{null, null_mut};
@@ -45,8 +46,6 @@ pub struct DeviceManager {
     devices: ArrayMap<SlotId, UsbDevice, DEVICES_CAPACITY>,
 }
 
-type DoorbellRegister = xhci::accessor::Single<xhci::registers::doorbell::Register, IdentityMapper>;
-
 impl DeviceManager {
     pub fn new() -> DeviceManager {
         DeviceManager {
@@ -76,7 +75,11 @@ impl DeviceManager {
         Ok(())
     }
 
-    pub fn allocate_device(&mut self, slot_id: SlotId, dbreg: DoorbellRegister) -> Result<()> {
+    pub fn allocate_device(
+        &mut self,
+        slot_id: SlotId,
+        dbreg: Accessor<DoorbellRegister>,
+    ) -> Result<()> {
         let device_context = allocate_array::<DeviceContext>(1, Some(64), Some(4096))
             .map_err(|e| make_error!(ErrorType::AllocError(e)))?;
         let input_context = allocate_array::<InputContext>(1, Some(64), Some(4096))
@@ -119,7 +122,7 @@ impl DeviceManager {
 pub struct UsbDevice {
     class_drivers: ArrayMap<EndpointNumber, ClassDriver, { EndpointNumber::MAX as usize }>,
     transfer_rings: ArrayMap<EndpointId, Ring, { EndpointId::MAX as usize }>,
-    dbreg: DoorbellRegister,
+    dbreg: Accessor<DoorbellRegister>,
     data_buf: *const (),
     ep_configs: ArrayVec<EndpointConfig, { EndpointNumber::MAX as usize }>,
     setup_stage_map: ArrayMap<*const Trb, *const SetupStageTrb, 16>,
@@ -617,10 +620,7 @@ impl UsbDevice {
     }
 
     fn ring_doorbell(&mut self, endpoint_id: EndpointId) {
-        self.dbreg.update(|reg| {
-            reg.set_doorbell_target(endpoint_id.address());
-            reg.set_doorbell_stream_id(0);
-        });
+        self.dbreg.as_mut().ring(endpoint_id.address(), 0);
     }
 
     fn alloc_transfer_ring(

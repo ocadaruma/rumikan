@@ -1,8 +1,6 @@
 use crate::usb::endpoint::EndpointType;
-use crate::usb::IdentityMapper;
+use crate::usb::xhc::{Accessor, PortRegisterSet};
 use core::convert::TryFrom;
-use xhci::accessor::Single;
-use xhci::registers::PortRegisterSet;
 
 #[repr(u8)]
 #[derive(Debug, Copy, Clone)]
@@ -64,11 +62,11 @@ impl TryFrom<u8> for PortSpeed {
 
 pub struct Port {
     num: u8,
-    reg: Single<PortRegisterSet, IdentityMapper>,
+    reg: Accessor<PortRegisterSet>,
 }
 
 impl Port {
-    pub fn new(num: u8, reg: Single<PortRegisterSet, IdentityMapper>) -> Port {
+    pub fn new(num: u8, reg: Accessor<PortRegisterSet>) -> Port {
         Port { num, reg }
     }
 
@@ -77,34 +75,28 @@ impl Port {
     }
 
     pub fn is_connected(&self) -> bool {
-        self.reg.read().portsc.current_connect_status()
+        self.reg.as_ref().portsc.read().current_connect_status()
     }
 
     pub fn is_enabled(&self) -> bool {
-        self.reg.read().portsc.port_enabled_disabled()
+        self.reg.as_ref().portsc.read().port_enabled_disabled()
     }
 
     pub fn is_port_reset_changed(&self) -> bool {
-        self.reg.read().portsc.port_reset_changed()
+        self.reg.as_ref().portsc.read().port_reset_change()
     }
 
     pub fn port_speed(&self) -> Option<PortSpeed> {
-        PortSpeed::try_from(self.reg.read().portsc.port_speed()).ok()
+        PortSpeed::try_from(self.reg.as_ref().portsc.read().port_speed()).ok()
     }
 
     pub fn reset(&mut self) {
-        self.reg.update(|p| {
-            p.portsc.bit_and_assign(0x0e00c3e0);
-            p.portsc.bit_or_assign(0x00020010);
-        });
-        while self.reg.read().portsc.port_reset() {}
+        self.reg.as_mut().portsc.update(|s| s.reset());
+        while self.reg.as_ref().portsc.read().port_reset() {}
     }
 
     pub fn clear_port_reset_change(&mut self) {
-        self.reg.update(|p| {
-            p.portsc.bit_and_assign(0x0e01c3e0);
-            p.portsc.set_port_reset_changed(true);
-        });
+        self.reg.as_mut().portsc.update(|s| s.clear_status_bit());
     }
 }
 
