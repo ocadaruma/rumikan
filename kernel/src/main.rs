@@ -23,15 +23,26 @@ pub extern "C" fn _start(frame_buffer_info: FrameBufferInfo) -> ! {
         PixelColor::new(0xff, 0xff, 0xff),
     );
     init_global_console(console);
-    init_logger(LogLevel::Debug);
+    init_logger(LogLevel::Info);
 
+    let mouse_cursor_info = MouseCursorInfo {
+        frame_buffer,
+        current_pos: (50, 50),
+        fill_color: PixelColor::new(0xff, 0, 0),
+        edge_color: PixelColor::new(0xff, 0xff, 0xff),
+        bgcolor: PixelColor::new(0, 0, 0),
+    };
+    unsafe {
+        MOUSE_CURSOR_INFO = Some(mouse_cursor_info);
+    }
     info!("Hello, world!");
     frame_buffer.write_mouse_cursor(
-        50,
-        50,
-        PixelColor::new(0xff, 0xff, 0xff),
-        PixelColor::new(0xff, 0, 0),
+        mouse_cursor_info.current_pos.0,
+        mouse_cursor_info.current_pos.1,
+        mouse_cursor_info.edge_color,
+        mouse_cursor_info.fill_color,
     );
+    rumikan_kernel_lib::usb::classdriver::set_default_mouse_observer(on_mouse_event);
 
     let mut pci = Pci::new();
     if pci.scan_all_bus().is_err() {
@@ -107,6 +118,33 @@ pub extern "C" fn _start(frame_buffer_info: FrameBufferInfo) -> ! {
             asm!("hlt");
         }
     }
+}
+
+#[derive(Copy, Clone)]
+struct MouseCursorInfo {
+    frame_buffer: FrameBuffer,
+    current_pos: (usize, usize),
+    fill_color: PixelColor,
+    edge_color: PixelColor,
+    bgcolor: PixelColor,
+}
+
+static mut MOUSE_CURSOR_INFO: Option<MouseCursorInfo> = None;
+
+fn on_mouse_event(delta: (i8, i8)) {
+    let mut info = unsafe { MOUSE_CURSOR_INFO }.unwrap();
+    info.frame_buffer
+        .erase_mouse_cursor(info.current_pos.0, info.current_pos.1, info.bgcolor);
+    let (x, y) = info.current_pos;
+    let (mut x, mut y) = (x as isize, y as isize);
+    x += delta.0 as isize;
+    y += delta.1 as isize;
+
+    let (x, y) = (x as usize, y as usize);
+    info.current_pos = (x, y);
+    info.frame_buffer
+        .write_mouse_cursor(x, y, info.edge_color, info.fill_color);
+    unsafe { MOUSE_CURSOR_INFO = Some(info) };
 }
 
 #[panic_handler]

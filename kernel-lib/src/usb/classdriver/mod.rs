@@ -12,6 +12,15 @@ pub enum ErrorType {
 pub type Error = ErrorContext<ErrorType>;
 pub type Result<T> = core::result::Result<T, Error>;
 
+pub type MouseObserver = fn((i8, i8));
+static mut DEFAULT_OBSERVER: Option<MouseObserver> = None;
+
+pub fn set_default_mouse_observer(observer: MouseObserver) {
+    unsafe {
+        DEFAULT_OBSERVER = Some(observer);
+    }
+}
+
 #[derive(Debug, Copy, Clone)]
 pub enum ClassDriver {
     HidMouse(*mut HidMouseDriver),
@@ -28,7 +37,6 @@ impl ClassDriver {
                         .expect("Failed to allocate memory for driver");
                 unsafe {
                     driver_ptr.write(HidMouseDriver {
-                        num_observers: 0,
                         interface_index: desc.interface_number(),
                         endpoint_interrupt_in: EndpointId::new(0),
                         buf: allocate(1024, None, None)
@@ -83,7 +91,6 @@ impl ClassDriver {
 
 #[derive(Debug)]
 pub struct HidMouseDriver {
-    num_observers: usize,
     interface_index: u8,
     endpoint_interrupt_in: EndpointId,
     buf: *const (),
@@ -102,9 +109,14 @@ impl HidMouseDriver {
         if ep_id.is_in() {
             let (x, y) = unsafe {
                 let ptr = self.buf as *const u8;
-                (ptr.add(1).read(), ptr.add(2).read())
+                (ptr.add(1).read() as i8, ptr.add(2).read() as i8)
             };
             debug!("event received. (x, y) = ({}, {})", x, y);
+            unsafe {
+                if let Some(observer) = DEFAULT_OBSERVER {
+                    observer((x, y));
+                }
+            }
         }
         // todo!()
     }

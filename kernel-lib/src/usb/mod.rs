@@ -1,6 +1,6 @@
 #[macro_use]
 mod bitfield;
-mod classdriver;
+pub mod classdriver;
 mod context;
 mod descriptor;
 mod devmgr;

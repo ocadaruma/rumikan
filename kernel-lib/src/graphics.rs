@@ -158,6 +158,14 @@ impl FrameBuffer {
         }
     }
 
+    pub fn erase_mouse_cursor(&mut self, x: usize, y: usize, bgcolor: PixelColor) {
+        for (dy, _) in mouse::CURSOR_GLYPH.iter().enumerate() {
+            for dx in 0..16 {
+                self.write_pixel(x + dx, y + dy, bgcolor);
+            }
+        }
+    }
+
     pub fn write_fmt(
         &mut self,
         x: usize,
