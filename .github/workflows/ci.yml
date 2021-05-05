@@ -18,10 +18,10 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install lld -y
-      - name: Install latest nightly
+      - name: Install nightly
         uses: actions-rs/toolchain@v1
         with:
-          toolchain: nightly
+          toolchain: nightly-2021-04-18
           override: true
           components: rust-src
       - name: Build
