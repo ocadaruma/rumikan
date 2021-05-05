@@ -140,6 +140,9 @@ fn on_mouse_event(delta: (i8, i8)) {
     x += delta.0 as isize;
     y += delta.1 as isize;
 
+    x = x.max(0);
+    y = y.max(0);
+
     let (x, y) = (x as usize, y as usize);
     info.current_pos = (x, y);
     info.frame_buffer
