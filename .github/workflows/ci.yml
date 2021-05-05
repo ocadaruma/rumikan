@@ -37,10 +37,10 @@ jobs:
         uses: actions-rs/toolchain@v1
         with:
           profile: minimal
-          toolchain: nightly
+          toolchain: nightly-2021-04-18
           components: rustfmt, clippy, rust-src
           override: true
       - name: Run cargo fmt
-        run: ./cargo-all.sh +stable fmt --all -- --check
+        run: ./cargo-all.sh fmt --all -- --check
       - name: Run clippy
         run: ./cargo-all.sh clippy
