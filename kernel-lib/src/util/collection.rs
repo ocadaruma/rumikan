@@ -169,7 +169,7 @@ impl<'a, K, V, const N: usize> Iterator for IterMut<'a, K, V, N> {
 
 #[cfg(test)]
 mod tests {
-    use crate::util::{ArrayMap, ArrayVec};
+    use crate::util::collection::{ArrayMap, ArrayVec};
 
     #[test]
     fn array_vec_add() {

@@ -1,5 +1,5 @@
 use crate::error::ErrorContext;
-use crate::util::ArrayVec;
+use crate::util::collection::ArrayVec;
 
 #[derive(Debug)]
 pub struct Pci {

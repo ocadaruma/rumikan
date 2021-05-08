@@ -1,7 +1,7 @@
 use core::fmt;
 use core::fmt::{Arguments, Write};
 
-use crate::util::ArrayVec;
+use crate::util::collection::ArrayVec;
 use rumikan_shared::graphics::{FrameBufferInfo, PixelFormat};
 
 pub mod fonts {

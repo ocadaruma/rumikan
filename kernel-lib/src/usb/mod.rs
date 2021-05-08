@@ -1,15 +1,3 @@
-#[macro_use]
-mod bitfield;
-pub mod classdriver;
-mod context;
-mod descriptor;
-mod devmgr;
-mod endpoint;
-mod mem;
-mod port;
-mod trb;
-mod xhci;
-
 use crate::error::ErrorContext;
 use crate::usb::devmgr::DeviceManager;
 use crate::usb::port::Port;
@@ -19,6 +7,16 @@ use crate::usb::trb::{
     EnableSlotCommandTrb, PortStatusChangeEventTrb, TransferEventTrb,
 };
 use crate::usb::xhci::{ExtendedCapability, Registers};
+
+pub mod classdriver;
+mod context;
+mod descriptor;
+mod devmgr;
+mod endpoint;
+mod mem;
+mod port;
+mod trb;
+mod xhci;
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub struct SlotId(u8);

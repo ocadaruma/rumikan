@@ -14,7 +14,7 @@ use crate::usb::trb::{
 };
 use crate::usb::xhci::{Accessor, DoorbellRegister};
 use crate::usb::SlotId;
-use crate::util::{ArrayMap, ArrayVec};
+use crate::util::collection::{ArrayMap, ArrayVec};
 use core::mem::size_of;
 use core::ptr::{null, null_mut};
 
@@ -30,8 +30,8 @@ pub enum ErrorType {
     InvalidEndpointNumber,
     TransferRingNotSet,
     UnknownXHCISpeedID,
-    ArrayMapError(crate::util::ArrayMapError),
-    ArrayVecError(crate::util::ArrayVecError),
+    ArrayMapError(crate::util::collection::ArrayMapError),
+    ArrayVecError(crate::util::collection::ArrayVecError),
     TrbError(crate::usb::trb::Error),
 }
 

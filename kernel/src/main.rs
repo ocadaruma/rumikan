@@ -1,11 +1,13 @@
 #![no_std]
 #![no_main]
 #![feature(asm)]
+#![feature(abi_x86_interrupt)]
 
 use core::panic::PanicInfo;
 
 use rumikan_kernel_lib::console::{init_global_console, Console};
 use rumikan_kernel_lib::graphics::{FrameBuffer, PixelColor};
+use rumikan_kernel_lib::interrupt::{DescriptorType, InterruptDescriptorAttribute, InterruptDescriptorTable, InterruptFrame, InterruptVector, notify_end_interrupt};
 use rumikan_kernel_lib::logger::{init_logger, LogLevel};
 use rumikan_kernel_lib::pci::{ClassCode, Pci};
 use rumikan_kernel_lib::usb::Xhc;
@@ -83,29 +85,12 @@ pub extern "C" fn _start(frame_buffer_info: FrameBufferInfo) -> ! {
             dev.device,
             dev.function
         );
+
         let xhc_mmio_base = dev.read_bar(0).unwrap() & !0xfusize;
         trace!("xHC mmio_base = 0x{:08x}", xhc_mmio_base);
         dev.switch_ehci2xhci_if_necessary(&pci);
 
-        let mut xhc = Xhc::new(xhc_mmio_base);
-        xhc.initialize();
-        xhc.run();
-
-        for i in 1..=xhc.max_ports() {
-            let mut port = xhc.port_at(i);
-            trace!(
-                "Port {} is_connected={}",
-                port.port_num(),
-                port.is_connected()
-            );
-
-            if port.is_connected() {
-                if let Err(err) = xhc.configure_port(&mut port) {
-                    error!("Failed to configure {} due to {:?}", port.port_num(), err);
-                }
-            }
-        }
-
+        let xhc = init_xhc(xhc_mmio_base);
         loop {
             if let Err(err) = xhc.poll() {
                 error!("Error while process event: {:?}", err);
@@ -153,4 +138,49 @@ fn on_mouse_event(delta: (i8, i8)) {
 #[panic_handler]
 fn panic(_info: &PanicInfo) -> ! {
     loop {}
+}
+
+static mut XHC: Option<Xhc> = None;
+
+#[allow(clippy::fn_to_numeric_cast)]
+fn init_xhc(mmio_base: usize) -> &'static mut Xhc {
+    let idt = InterruptDescriptorTable::get_mut();
+    idt.set(
+        InterruptVector::XHCI,
+        InterruptDescriptorAttribute::new()
+            .with_descriptor_type(DescriptorType::InterruptGate)
+            .with_descriptor_privilege_level(0),
+        xhc_interrupt_handler as u64,
+    );
+    idt.load();
+
+    let xhc = Xhc::new(mmio_base);
+    let xhc = unsafe {
+        XHC = Some(xhc);
+        XHC.as_mut().unwrap()
+    };
+    xhc.initialize();
+    xhc.run();
+
+    for i in 1..=xhc.max_ports() {
+        let mut port = xhc.port_at(i);
+        trace!(
+            "Port {} is_connected={}",
+            port.port_num(),
+            port.is_connected()
+        );
+
+        if port.is_connected() {
+            if let Err(err) = xhc.configure_port(&mut port) {
+                error!("Failed to configure {} due to {:?}", port.port_num(), err);
+            }
+        }
+    }
+    xhc
+}
+
+extern "x86-interrupt" fn xhc_interrupt_handler(_frame: *mut InterruptFrame) {
+    debug!("xhc interruption");
+
+    notify_end_interrupt();
 }

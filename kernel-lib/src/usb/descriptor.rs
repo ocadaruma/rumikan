@@ -48,7 +48,7 @@ impl Iterator for DescriptorIter {
     fn next(&mut self) -> Option<Self::Item> {
         if self.offset < self.len {
             let ptr = self.ptr;
-            let desc_len = unsafe { ptr.read_volatile() } as usize;
+            let desc_len = unsafe { *ptr } as usize;
 
             self.offset += desc_len;
             self.ptr = unsafe { ptr.add(desc_len) };
