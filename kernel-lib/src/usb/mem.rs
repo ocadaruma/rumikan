@@ -56,7 +56,7 @@ pub fn allocate<T>(
             Ok(ptr as *mut T)
         }
     } else {
-        Err(make_error!(ErrorType::OutOfMemory))
+        Err(mkerror!(ErrorType::OutOfMemory))
     }
 }
 

@@ -7,15 +7,16 @@ mod devmgr;
 mod endpoint;
 mod mem;
 mod port;
-mod ring;
+mod trb;
 mod xhci;
 
 use crate::error::ErrorContext;
 use crate::usb::devmgr::DeviceManager;
 use crate::usb::port::Port;
-use crate::usb::ring::{
+use crate::usb::trb::ring::{EventRing, Ring};
+use crate::usb::trb::{
     AddressDeviceCommandTrb, CommandCompletionEventTrb, ConfigureEndpointCommandTrb,
-    EnableSlotCommandTrb, EventRing, PortStatusChangeEventTrb, Ring, TransferEventTrb, TrbType,
+    EnableSlotCommandTrb, PortStatusChangeEventTrb, TransferEventTrb,
 };
 use crate::usb::xhci::{ExtendedCapability, Registers};
 
@@ -56,8 +57,8 @@ impl Xhc {
         Xhc {
             registers: Registers::new(mmio_base),
             device_manager: DeviceManager::new(),
-            command_ring: Ring::default(),
-            event_ring: EventRing::default(),
+            command_ring: Ring::new(),
+            event_ring: EventRing::new(),
             port_config_phase: [ConfigPhase::NotConnected; 256],
             addressing_port: None,
         }
@@ -120,40 +121,38 @@ impl Xhc {
         }
     }
 
-    pub fn process_event(&mut self) -> Result<()> {
-        match self.event_ring.peek_front() {
-            Some(trb) => {
-                let result = match trb.specialize() {
-                    TrbType::TransferEvent(trb) => self.on_transfer_event(trb),
-                    TrbType::CommandCompletionEvent(trb) => self.on_command_completion_event(trb),
-                    TrbType::PortStatusChangeEvent(trb) => self.on_port_status_change_event(trb),
-                    other => {
-                        debug!("Unexpected trb type: {:?}", other);
-                        Err(make_error!(ErrorType::NotImplemented))
-                    }
-                };
-                self.event_ring.pop();
-                result
+    pub fn poll(&mut self) -> Result<()> {
+        if let Some(trb) = self.event_ring.poll() {
+            if let Some(trb) = trb.specialize::<TransferEventTrb>() {
+                self.on_transfer_event(trb)
+            } else if let Some(trb) = trb.specialize::<CommandCompletionEventTrb>() {
+                self.on_command_completion_event(trb)
+            } else if let Some(trb) = trb.specialize::<PortStatusChangeEventTrb>() {
+                self.on_port_status_change_event(trb)
+            } else {
+                debug!("Unexpected trb type: {:?}", trb.trb_type());
+                Err(mkerror!(ErrorType::NotImplemented))
             }
-            None => Ok(()),
+        } else {
+            Ok(())
         }
     }
 
-    fn on_transfer_event(&mut self, trb: TransferEventTrb) -> Result<()> {
+    fn on_transfer_event(&mut self, trb: &TransferEventTrb) -> Result<()> {
         let slot_id = trb.slot_id();
         debug!(
             "TransferEvent: slot_id = {}, issuer = {:?}",
             trb.slot_id().value(),
-            unsafe { trb.trb_pointer().read() }.specialize()
+            trb.issuer_trb().trb_type()
         );
 
         let dev = self
             .device_manager
             .find_by_slot(slot_id)
-            .ok_or_else(|| make_error!(ErrorType::InvalidSlotId))?;
-        dev.on_transfer_event_received(&trb)
+            .ok_or_else(|| mkerror!(ErrorType::InvalidSlotId))?;
+        dev.on_transfer_event_received(trb)
             .map_err(ErrorType::DeviceError)
-            .map_err(|e| make_error!(e))?;
+            .map_err(|e| mkerror!(e))?;
 
         let port_id = dev.device_context().slot_context.root_hub_port_num();
         if dev.is_initialized()
@@ -165,69 +164,71 @@ impl Xhc {
         }
     }
 
-    fn on_command_completion_event(&mut self, trb: CommandCompletionEventTrb) -> Result<()> {
+    fn on_command_completion_event(&mut self, trb: &CommandCompletionEventTrb) -> Result<()> {
         debug!(
             "CommandCompletionEvent: slot_id = {}, issuer = {:?}",
             trb.slot_id().value(),
-            unsafe { trb.trb_pointer().read() }.specialize()
+            trb.issuer().trb_type()
         );
 
-        match unsafe { trb.trb_pointer().read() }.specialize() {
-            TrbType::EnableSlotCommand(_) => {
-                if let Some(addressing_port) = self.addressing_port {
-                    if self.port_config_phase[addressing_port as usize] == ConfigPhase::EnablingSlot
-                    {
-                        return self.address_device(addressing_port, trb.slot_id());
-                    }
+        if trb.issuer().specialize::<EnableSlotCommandTrb>().is_some() {
+            if let Some(addressing_port) = self.addressing_port {
+                if self.port_config_phase[addressing_port as usize] == ConfigPhase::EnablingSlot {
+                    return self.address_device(addressing_port, trb.slot_id());
                 }
             }
-            TrbType::AddressDeviceCommand(_) => {
-                let port_id = {
-                    let dev = self
-                        .device_manager
-                        .find_by_slot(trb.slot_id())
-                        .ok_or_else(|| make_error!(ErrorType::InvalidSlotId))?;
-                    dev.device_context().slot_context.root_hub_port_num()
-                };
-
-                if self.addressing_port == Some(port_id)
-                    && self.port_config_phase[port_id as usize] == ConfigPhase::AddressingDevice
-                {
-                    self.addressing_port = None;
-                    for i in 0..self.port_config_phase.len() {
-                        if self.port_config_phase[i] == ConfigPhase::WaitingAddressed {
-                            let mut port = self.port_at(i as u8);
-                            self.reset_port(&mut port)?;
-                            break;
-                        }
-                    }
-
-                    self.port_config_phase[port_id as usize] = ConfigPhase::InitializingDevice;
-                    return self
-                        .device_manager
-                        .find_by_slot(trb.slot_id())
-                        .expect("Existence is guaranteed here")
-                        .start_initialize()
-                        .map_err(|e| make_error!(ErrorType::DeviceError(e)));
-                }
-            }
-            TrbType::ConfigureEndpointCommand(_) => {
+        } else if trb
+            .issuer()
+            .specialize::<AddressDeviceCommandTrb>()
+            .is_some()
+        {
+            let port_id = {
                 let dev = self
                     .device_manager
                     .find_by_slot(trb.slot_id())
-                    .ok_or_else(|| make_error!(ErrorType::InvalidSlotId))?;
-                let port_id = dev.device_context().slot_context.root_hub_port_num();
-                if self.port_config_phase[port_id as usize] == ConfigPhase::ConfiguringEndpoints {
-                    self.port_config_phase[port_id as usize] = ConfigPhase::Configured;
-                    return dev
-                        .on_endpoints_configured()
-                        .map_err(ErrorType::DeviceError)
-                        .map_err(|e| make_error!(e));
+                    .ok_or_else(|| mkerror!(ErrorType::InvalidSlotId))?;
+                dev.device_context().slot_context.root_hub_port_num()
+            };
+
+            if self.addressing_port == Some(port_id)
+                && self.port_config_phase[port_id as usize] == ConfigPhase::AddressingDevice
+            {
+                self.addressing_port = None;
+                for i in 0..self.port_config_phase.len() {
+                    if self.port_config_phase[i] == ConfigPhase::WaitingAddressed {
+                        let mut port = self.port_at(i as u8);
+                        self.reset_port(&mut port)?;
+                        break;
+                    }
                 }
+
+                self.port_config_phase[port_id as usize] = ConfigPhase::InitializingDevice;
+                return self
+                    .device_manager
+                    .find_by_slot(trb.slot_id())
+                    .expect("Existence is guaranteed here")
+                    .start_initialize()
+                    .map_err(|e| mkerror!(ErrorType::DeviceError(e)));
             }
-            _ => {}
+        } else if trb
+            .issuer()
+            .specialize::<ConfigureEndpointCommandTrb>()
+            .is_some()
+        {
+            let dev = self
+                .device_manager
+                .find_by_slot(trb.slot_id())
+                .ok_or_else(|| mkerror!(ErrorType::InvalidSlotId))?;
+            let port_id = dev.device_context().slot_context.root_hub_port_num();
+            if self.port_config_phase[port_id as usize] == ConfigPhase::ConfiguringEndpoints {
+                self.port_config_phase[port_id as usize] = ConfigPhase::Configured;
+                return dev
+                    .on_endpoints_configured()
+                    .map_err(ErrorType::DeviceError)
+                    .map_err(|e| mkerror!(e));
+            }
         }
-        Err(make_error!(ErrorType::InvalidPhase))
+        Err(mkerror!(ErrorType::InvalidPhase))
     }
 
     fn address_device(&mut self, port_id: u8, slot_id: SlotId) -> Result<()> {
@@ -236,28 +237,29 @@ impl Xhc {
             .registers
             .doorbell
             .at(slot_id.value() as usize)
-            .ok_or_else(|| make_error!(ErrorType::InvalidSlotId))?;
+            .ok_or_else(|| mkerror!(ErrorType::InvalidSlotId))?;
         self.device_manager
             .allocate_device(slot_id, dbreg)
-            .map_err(|e| make_error!(ErrorType::DeviceError(e)))?;
+            .map_err(|e| mkerror!(ErrorType::DeviceError(e)))?;
 
         let dev = self
             .device_manager
             .find_by_slot(slot_id)
             .expect("Existence is guaranteed here");
         dev.address_device(port)
-            .map_err(|e| make_error!(ErrorType::DeviceError(e)))?;
+            .map_err(|e| mkerror!(ErrorType::DeviceError(e)))?;
 
         self.port_config_phase[port_id as usize] = ConfigPhase::AddressingDevice;
-        let cmd = AddressDeviceCommandTrb::new(slot_id, dev.input_context_ptr());
-
-        self.command_ring.push(cmd.data());
+        self.command_ring.push(AddressDeviceCommandTrb::new(
+            slot_id,
+            dev.input_context_ptr(),
+        ));
         self.registers.doorbell.at(0).unwrap().as_mut().ring(0, 0);
 
         Ok(())
     }
 
-    fn on_port_status_change_event(&mut self, trb: PortStatusChangeEventTrb) -> Result<()> {
+    fn on_port_status_change_event(&mut self, trb: &PortStatusChangeEventTrb) -> Result<()> {
         let port_id = trb.port_id();
         debug!("PortStatusChangeEvent: port_id = {}", port_id);
 
@@ -271,7 +273,7 @@ impl Xhc {
             }
             phase => {
                 debug!("port = {}, phase: {:?}", port_id, phase);
-                Err(make_error!(ErrorType::InvalidPhase))
+                Err(mkerror!(ErrorType::InvalidPhase))
             }
         }
     }
@@ -284,12 +286,11 @@ impl Xhc {
             .expect("Device existence is guaranteed here");
         let input_context_ptr = dev.input_context_ptr();
         dev.configure_endpoints(port)
-            .map_err(|e| make_error!(ErrorType::DeviceError(e)))?;
+            .map_err(|e| mkerror!(ErrorType::DeviceError(e)))?;
 
         self.port_config_phase[port_id as usize] = ConfigPhase::ConfiguringEndpoints;
-        let cmd = ConfigureEndpointCommandTrb::new(slot_id, input_context_ptr);
-
-        self.command_ring.push(cmd.data());
+        self.command_ring
+            .push(ConfigureEndpointCommandTrb::new(slot_id, input_context_ptr));
         self.registers.doorbell.at(0).unwrap().as_mut().ring(0, 0);
 
         Ok(())
@@ -300,8 +301,7 @@ impl Xhc {
             port.clear_port_reset_change();
             self.port_config_phase[port.port_num() as usize] = ConfigPhase::EnablingSlot;
 
-            let trb = EnableSlotCommandTrb::default();
-            self.command_ring.push(trb.data());
+            self.command_ring.push(EnableSlotCommandTrb::new());
             self.registers.doorbell.at(0).unwrap().as_mut().ring(0, 0);
         }
     }
@@ -320,7 +320,7 @@ impl Xhc {
                             ConfigPhase::ResettingPort;
                         port.reset();
                     }
-                    _ => return Err(make_error!(ErrorType::InvalidPhase)),
+                    _ => return Err(mkerror!(ErrorType::InvalidPhase)),
                 },
             }
         }
@@ -399,7 +399,7 @@ impl Xhc {
         self.command_ring
             .initialize(32)
             .expect("Failed to initialize command ring");
-        let ptr = self.command_ring.ptr_as_u64();
+        let ptr = self.command_ring.buffer_pointer();
         self.registers.operational.as_mut().crcr.update(|c| {
             c.set_ring_cycle_state(true);
             c.set_command_stop(false);

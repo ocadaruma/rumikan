@@ -1,6 +1,6 @@
 use crate::usb::endpoint::EndpointId;
 use crate::usb::port::PortSpeed;
-use bit_field::BitField;
+use bit_field::{BitArray, BitField};
 use core::convert::TryFrom;
 
 #[repr(transparent)]
@@ -28,51 +28,22 @@ impl SlotContext {
 #[repr(C)]
 #[derive(Debug, Default)]
 pub struct EndpointContext {
-    bits0: u32,
-    bits1: u32,
-    bits2: u64,
-    bits3: u32,
-    _placement: [u32; 3],
+    data: [u64; 4],
 }
 impl EndpointContext {
-    pub fn set_endpoint_type(&mut self, t: u8) {
-        self.bits1.set_bits(3..6, t as u32);
-    }
-
-    pub fn set_max_packet_size(&mut self, s: u16) {
-        self.bits1.set_bits(16..32, s as u32);
-    }
-
-    pub fn set_max_burst_size(&mut self, s: u8) {
-        self.bits1.set_bits(8..16, s as u32);
-    }
-
-    pub fn set_interval(&mut self, i: u8) {
-        self.bits0.set_bits(16..24, i as u32);
-    }
-
-    pub fn set_average_trb_length(&mut self, l: u16) {
-        self.bits3.set_bits(0..16, l as u32);
-    }
-
-    pub fn set_dequeue_cycle_state(&mut self, b: bool) {
-        self.bits2.set_bit(0, b);
-    }
-
-    pub fn set_max_primary_streams(&mut self, s: u8) {
-        self.bits0.set_bits(10..15, s as u32);
-    }
-
-    pub fn set_mult(&mut self, s: u8) {
-        self.bits0.set_bits(8..10, s as u32);
-    }
-
-    pub fn set_error_count(&mut self, s: u8) {
-        self.bits1.set_bits(1..3, s as u32);
-    }
+    setbits!(pub set_mult: u8; data; 8; 2);
+    setbits!(pub set_max_primary_streams: u8; data; 10; 5);
+    setbits!(pub set_interval: u8; data; 16; 8);
+    setbits!(pub set_error_count: u8; data; 33; 2);
+    setbits!(pub set_endpoint_type: u8; data; 35; 3);
+    setbits!(pub set_max_burst_size: u8; data; 40; 8);
+    setbits!(pub set_max_packet_size: u16; data; 48; 16);
+    setbit!(pub set_dequeue_cycle_state; data; 64);
+    setbits!(_set_transfer_ring_buffer: u64; data; 68; 60);
+    setbits!(pub set_average_trb_length: u16; data; 128; 16);
 
     pub fn set_transfer_ring_buffer(&mut self, ptr: u64) {
-        self.bits2.set_bits(4..64, ptr >> 4);
+        self._set_transfer_ring_buffer(ptr >> 4);
     }
 }
 

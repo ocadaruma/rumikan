@@ -33,3 +33,34 @@ macro_rules! setbits {
         }
     };
 }
+
+#[macro_export]
+macro_rules! withbit {
+    ($vis:vis $name:ident ; $field:tt $([$idx:literal])? ; $offset:literal) => {
+        $vis fn $name(mut self, value: bool) -> Self {
+            (self.$field $([$idx])?).set_bit($offset, value);
+            self
+        }
+    };
+}
+
+#[macro_export]
+macro_rules! withbits {
+    ($vis:vis $name:ident : $ty:ty ; $field:tt $([$idx:literal])? ; $offset:literal ; $length:literal) => {
+        $vis fn $name(mut self, value: $ty) -> Self {
+            (self.$field $([$idx])?).set_bits(($offset)..(($offset) + ($length)), value.into());
+            self
+        }
+    };
+}
+
+#[cfg(test)]
+mod tests {
+    use bit_field::BitField;
+
+    #[test]
+    fn test_bit_field() {
+        let x = 0x00112000;
+        assert_eq!(x.get_bits(16..32) as u16, 17);
+    }
+}

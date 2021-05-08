@@ -15,7 +15,6 @@ impl EndpointNumber {
 pub struct EndpointId(u8);
 impl EndpointId {
     pub const DEFAULT_CONTROL_PIPE_ID: Self = Self(1);
-
     pub const MAX: u8 = 0x1f;
 
     pub fn new(addr: u8) -> Self {

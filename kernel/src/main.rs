@@ -107,7 +107,7 @@ pub extern "C" fn _start(frame_buffer_info: FrameBufferInfo) -> ! {
         }
 
         loop {
-            if let Err(err) = xhc.process_event() {
+            if let Err(err) = xhc.poll() {
                 error!("Error while process event: {:?}", err);
             }
         }

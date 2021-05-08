@@ -85,7 +85,7 @@ impl Pci {
             })
             .is_err()
         {
-            return Err(make_error!(ErrorType::TooManyDevices));
+            return Err(mkerror!(ErrorType::TooManyDevices));
         }
 
         if class_code.base == 0x06 && class_code.sub == 0x04 {
@@ -142,7 +142,7 @@ impl Device {
 
     pub fn read_bar(&self, index: u8) -> Result<usize> {
         if index >= 6 {
-            return Err(make_error!(ErrorType::IndexOutOfRange));
+            return Err(mkerror!(ErrorType::IndexOutOfRange));
         }
 
         let addr = 0x10 + (4 * index);
@@ -155,7 +155,7 @@ impl Device {
             return Ok(bar as usize);
         }
         if index >= 5 {
-            return Err(make_error!(ErrorType::IndexOutOfRange));
+            return Err(mkerror!(ErrorType::IndexOutOfRange));
         }
 
         out32(
