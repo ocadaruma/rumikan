@@ -1,19 +1,19 @@
 use core::mem::MaybeUninit;
 use core::ops::{Index, IndexMut};
 
+#[derive(Debug)]
+pub enum CollectionError {
+    NoSpace,
+}
+
+pub type Result<T> = core::result::Result<T, CollectionError>;
+
 /// Fixed-sized array-backed vector.
 #[derive(Debug)]
 pub struct ArrayVec<T, const N: usize> {
     buf: [T; N],
     len: usize,
 }
-
-#[derive(Debug)]
-pub enum ArrayVecError {
-    NoSpace,
-}
-
-pub type Result<T> = core::result::Result<T, ArrayVecError>;
 
 #[allow(clippy::len_without_is_empty)]
 impl<T, const N: usize> ArrayVec<T, N> {
@@ -34,7 +34,7 @@ impl<T, const N: usize> ArrayVec<T, N> {
             self.len += 1;
             Result::Ok(())
         } else {
-            Result::Err(ArrayVecError::NoSpace)
+            Result::Err(CollectionError::NoSpace)
         }
     }
 
@@ -71,13 +71,6 @@ pub struct ArrayMap<K, V, const N: usize> {
     buf: [Option<(K, V)>; N],
 }
 
-pub type ArrayMapResult<T> = core::result::Result<T, ArrayMapError>;
-
-#[derive(Debug)]
-pub enum ArrayMapError {
-    NoSpace,
-}
-
 #[allow(clippy::new_without_default)]
 impl<K, V, const N: usize> ArrayMap<K, V, N>
 where
@@ -93,7 +86,7 @@ where
         }
     }
 
-    pub fn insert(&mut self, key: K, value: V) -> ArrayMapResult<Option<V>> {
+    pub fn insert(&mut self, key: K, value: V) -> Result<Option<V>> {
         for elem in self.buf.iter_mut() {
             match elem {
                 Some((k, _)) if k == &key => {
@@ -108,7 +101,7 @@ where
                 _ => {}
             }
         }
-        Err(ArrayMapError::NoSpace)
+        Err(CollectionError::NoSpace)
     }
 
     pub fn get(&self, key: &K) -> Option<&V> {
@@ -167,9 +160,56 @@ impl<'a, K, V, const N: usize> Iterator for IterMut<'a, K, V, N> {
     }
 }
 
+#[derive(Debug)]
+pub struct ArrayQueue<T, const N: usize> {
+    enqueue_ptr: usize,
+    len: usize,
+    buf: [T; N],
+}
+
+#[allow(clippy::new_without_default)]
+impl<T, const N: usize> ArrayQueue<T, N>
+where
+    T: Default,
+{
+    pub fn new() -> Self {
+        let mut buf: [MaybeUninit<T>; N] = MaybeUninit::uninit_array();
+        for elem in buf.iter_mut() {
+            *elem = MaybeUninit::zeroed();
+        }
+        Self {
+            enqueue_ptr: 0,
+            len: 0,
+            buf: unsafe { MaybeUninit::array_assume_init(buf) },
+        }
+    }
+
+    pub fn push(&mut self, elem: T) -> Result<()> {
+        if self.len < N {
+            self.buf[self.enqueue_ptr] = elem;
+            self.enqueue_ptr = (self.enqueue_ptr + 1) % N;
+            self.len += 1;
+            Ok(())
+        } else {
+            Err(CollectionError::NoSpace)
+        }
+    }
+
+    pub fn poll(&mut self) -> Option<T> {
+        if self.len > 0 {
+            let dequeue_ptr =
+                (((self.enqueue_ptr as isize - self.len as isize) + N as isize) as usize) % N;
+            self.len -= 1;
+            Some(core::mem::take(&mut self.buf[dequeue_ptr]))
+        } else {
+            None
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use crate::util::collection::{ArrayMap, ArrayVec};
+    use crate::util::collection::{ArrayMap, ArrayQueue, ArrayVec};
 
     #[test]
     fn array_vec_add() {
@@ -231,5 +271,28 @@ mod tests {
         assert_eq!(iter.next(), Some((&1, &mut "one")));
         assert_eq!(iter.next(), Some((&3, &mut "three")));
         assert!(iter.next().is_none());
+    }
+
+    #[test]
+    fn array_queue() {
+        let mut queue: ArrayQueue<i32, 3> = ArrayQueue::new();
+        assert_eq!(queue.poll(), None);
+
+        assert!(queue.push(1).is_ok());
+        assert!(queue.push(2).is_ok());
+        assert!(queue.push(3).is_ok());
+        assert!(queue.push(4).is_err());
+
+        assert_eq!(queue.poll(), Some(1));
+        assert_eq!(queue.poll(), Some(2));
+
+        assert!(queue.push(4).is_ok());
+        assert!(queue.push(5).is_ok());
+        assert!(queue.push(6).is_err());
+
+        assert_eq!(queue.poll(), Some(3));
+        assert_eq!(queue.poll(), Some(4));
+        assert_eq!(queue.poll(), Some(5));
+        assert_eq!(queue.poll(), None);
     }
 }

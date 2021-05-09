@@ -25,7 +25,7 @@ impl SlotContext {
     }
 }
 
-#[repr(C)]
+#[repr(transparent)]
 #[derive(Debug, Default)]
 pub struct EndpointContext {
     data: [u64; 4],

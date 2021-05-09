@@ -9,11 +9,12 @@ use rumikan_kernel_lib::console::{init_global_console, Console};
 use rumikan_kernel_lib::graphics::{FrameBuffer, PixelColor};
 use rumikan_kernel_lib::interrupt::{
     notify_end_interrupt, DescriptorType, InterruptDescriptorAttribute, InterruptDescriptorTable,
-    InterruptFrame, InterruptVector,
+    InterruptEvent, InterruptFrame, InterruptVector,
 };
 use rumikan_kernel_lib::logger::{init_logger, LogLevel};
 use rumikan_kernel_lib::pci::{ClassCode, MSIDeliveryMode, MSITriggerMode, Pci};
 use rumikan_kernel_lib::usb::Xhc;
+use rumikan_kernel_lib::util::collection::ArrayQueue;
 use rumikan_shared::graphics::FrameBufferInfo;
 
 #[macro_use]
@@ -115,7 +116,10 @@ pub extern "C" fn _start(frame_buffer_info: FrameBufferInfo) -> ! {
         ) {
             error!("Error during configuring MSI {:?}", err);
         } else {
+            InterruptEventManager::init();
             init_xhc(xhc_mmio_base);
+
+            InterruptEventManager::run();
         }
     }
 
@@ -156,12 +160,76 @@ fn on_mouse_event(delta: (i8, i8)) {
     unsafe { MOUSE_CURSOR_INFO = Some(info) };
 }
 
+#[derive(Debug)]
+struct InterruptEventManager {
+    queue: ArrayQueue<InterruptEvent, 32>,
+}
+
+impl InterruptEventManager {
+    fn init() {
+        unsafe {
+            INTERRUPT_EVENT_MANAGER = Some(Self {
+                queue: ArrayQueue::new(),
+            });
+        }
+    }
+
+    fn push(event: InterruptEvent) {
+        let queue = unsafe { &mut INTERRUPT_EVENT_MANAGER.as_mut().unwrap().queue };
+        if let Err(err) = queue.push(event) {
+            error!("Failed to push interrupt event: {:?}", err);
+        }
+    }
+
+    /// Start interruption event loop
+    fn run() {
+        let queue = unsafe { &mut INTERRUPT_EVENT_MANAGER.as_mut().unwrap().queue };
+        loop {
+            unsafe {
+                asm!("cli");
+            }
+            if let Some(event) = queue.poll() {
+                unsafe {
+                    asm!("sti");
+                }
+                match event {
+                    InterruptEvent::Unknown => error!("Unknown interrupt event"),
+                    InterruptEvent::XHCI => Self::handle_xhci(),
+                }
+            } else {
+                unsafe {
+                    asm!("sti\nhlt");
+                }
+            }
+        }
+    }
+
+    fn handle_xhci() {
+        let xhc = unsafe { XHC.as_mut().unwrap() };
+        loop {
+            let ret = xhc.poll();
+            match ret {
+                Ok(opt) => {
+                    if opt.is_none() {
+                        break;
+                    }
+                }
+                Err(err) => {
+                    error!("Error while process event: {:?}", err);
+                    break;
+                }
+            }
+        }
+    }
+}
+
 #[panic_handler]
 fn panic(_info: &PanicInfo) -> ! {
     loop {}
 }
 
 static mut XHC: Option<Xhc> = None;
+static mut INTERRUPT_EVENT_MANAGER: Option<InterruptEventManager> = None;
 
 #[allow(clippy::fn_to_numeric_cast)]
 fn init_xhc(mmio_base: usize) {
@@ -195,21 +263,6 @@ fn init_xhc(mmio_base: usize) {
 
 extern "x86-interrupt" fn xhc_interrupt_handler(_frame: *mut InterruptFrame) {
     debug!("xhc interruption");
-    let xhc = unsafe { XHC.as_mut().unwrap() };
-    loop {
-        let ret = xhc.poll();
-        match ret {
-            Ok(opt) => {
-                if opt.is_none() {
-                    break;
-                }
-            }
-            Err(err) => {
-                error!("Error while process event: {:?}", err);
-                break;
-            }
-        }
-    }
-
+    InterruptEventManager::push(InterruptEvent::XHCI);
     notify_end_interrupt();
 }

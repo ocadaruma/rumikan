@@ -136,6 +136,18 @@ pub enum InterruptVector {
     XHCI = 0x40,
 }
 
+#[derive(Debug)]
+pub enum InterruptEvent {
+    Unknown,
+    XHCI,
+}
+
+impl Default for InterruptEvent {
+    fn default() -> Self {
+        Self::Unknown
+    }
+}
+
 pub fn notify_end_interrupt() {
     let ptr: u64 = 0xfee000b0;
     unsafe { (ptr as *mut u32).write_volatile(0) }

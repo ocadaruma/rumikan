@@ -30,8 +30,7 @@ pub enum ErrorType {
     InvalidEndpointNumber,
     TransferRingNotSet,
     UnknownXHCISpeedID,
-    ArrayMapError(crate::util::collection::ArrayMapError),
-    ArrayVecError(crate::util::collection::ArrayVecError),
+    CollectionError(crate::util::collection::CollectionError),
     TrbError(crate::usb::trb::Error),
 }
 
@@ -110,7 +109,7 @@ impl DeviceManager {
 
         self.devices
             .insert(slot_id, dev)
-            .map_err(|e| mkerror!(ErrorType::ArrayMapError(e)))
+            .map_err(|e| mkerror!(ErrorType::CollectionError(e)))
             .map(|_| ())
     }
 
@@ -396,10 +395,10 @@ impl UsbDevice {
                             let conf = EndpointConfig::from(&ep_desc);
                             self.class_drivers
                                 .insert(conf.endpoint_id.number(), class_driver)
-                                .map_err(|e| mkerror!(ErrorType::ArrayMapError(e)))?;
+                                .map_err(|e| mkerror!(ErrorType::CollectionError(e)))?;
                             self.ep_configs
                                 .push(conf)
-                                .map_err(|e| mkerror!(ErrorType::ArrayVecError(e)))?;
+                                .map_err(|e| mkerror!(ErrorType::CollectionError(e)))?;
                         }
                         Some(DescriptorType::Hid(_)) => {
                             // noop
@@ -482,7 +481,7 @@ impl UsbDevice {
         if let Some(driver) = issuer {
             self.event_waiters
                 .insert(setup_data, driver)
-                .map_err(|e| mkerror!(ErrorType::ArrayMapError(e)))?;
+                .map_err(|e| mkerror!(ErrorType::CollectionError(e)))?;
         }
 
         if EndpointNumber::MAX_ENDPOINT < endpoint_id.number() {
@@ -511,7 +510,7 @@ impl UsbDevice {
 
                 self.setup_stage_map
                     .insert(data_stage_ptr, setup_stage)
-                    .map_err(|e| mkerror!(ErrorType::ArrayMapError(e)))?;
+                    .map_err(|e| mkerror!(ErrorType::CollectionError(e)))?;
             }
             None => {
                 let setup_stage = tr
@@ -526,7 +525,7 @@ impl UsbDevice {
                     .ptr;
                 self.setup_stage_map
                     .insert(status_trb_ptr, setup_stage)
-                    .map_err(|e| mkerror!(ErrorType::ArrayMapError(e)))?;
+                    .map_err(|e| mkerror!(ErrorType::CollectionError(e)))?;
             }
         }
 
@@ -545,7 +544,7 @@ impl UsbDevice {
         if let Some(driver) = issuer {
             self.event_waiters
                 .insert(setup_data, driver)
-                .map_err(ErrorType::ArrayMapError)
+                .map_err(ErrorType::CollectionError)
                 .map_err(|e| mkerror!(e))?;
         }
 
@@ -575,7 +574,7 @@ impl UsbDevice {
 
                 self.setup_stage_map
                     .insert(data_stage_ptr, setup_stage)
-                    .map_err(ErrorType::ArrayMapError)
+                    .map_err(ErrorType::CollectionError)
                     .map_err(|e| mkerror!(e))?;
             }
             None => {
@@ -587,7 +586,7 @@ impl UsbDevice {
                     .ptr;
                 self.setup_stage_map
                     .insert(status_trb_ptr, setup_stage)
-                    .map_err(ErrorType::ArrayMapError)
+                    .map_err(ErrorType::CollectionError)
                     .map_err(|e| mkerror!(e))?;
             }
         }
@@ -624,7 +623,7 @@ impl UsbDevice {
 
         self.transfer_rings
             .insert(endpoint_id, ring)
-            .map_err(|e| mkerror!(ErrorType::ArrayMapError(e)))?;
+            .map_err(|e| mkerror!(ErrorType::CollectionError(e)))?;
         Ok(self
             .transfer_rings
             .get_mut(&endpoint_id)
