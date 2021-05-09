@@ -119,20 +119,20 @@ impl Xhc {
         }
     }
 
-    pub fn poll(&mut self) -> Result<()> {
+    pub fn poll(&mut self) -> Result<Option<()>> {
         if let Some(trb) = self.event_ring.poll() {
             if let Some(trb) = trb.specialize::<TransferEventTrb>() {
-                self.on_transfer_event(trb)
+                self.on_transfer_event(trb).map(|_| Some(()))
             } else if let Some(trb) = trb.specialize::<CommandCompletionEventTrb>() {
-                self.on_command_completion_event(trb)
+                self.on_command_completion_event(trb).map(|_| Some(()))
             } else if let Some(trb) = trb.specialize::<PortStatusChangeEventTrb>() {
-                self.on_port_status_change_event(trb)
+                self.on_port_status_change_event(trb).map(|_| Some(()))
             } else {
                 debug!("Unexpected trb type: {:?}", trb.trb_type());
                 Err(mkerror!(ErrorType::NotImplemented))
             }
         } else {
-            Ok(())
+            Ok(None)
         }
     }
 

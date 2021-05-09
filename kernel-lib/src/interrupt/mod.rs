@@ -1,4 +1,5 @@
 use bit_field::BitField;
+use core::mem::size_of;
 
 #[repr(u8)]
 #[derive(Debug, Copy, Clone)]
@@ -52,7 +53,7 @@ static mut IDT: InterruptDescriptorTable = InterruptDescriptorTable {
 };
 
 #[repr(transparent)]
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug)]
 pub struct InterruptDescriptorTable {
     data: [InterruptDescriptor; 256],
 }
@@ -81,25 +82,42 @@ impl InterruptDescriptorTable {
 
     pub fn load(&self) {
         let ptr: *const Self = self;
-        let arg = LIDTArg {
-            size: (self.data.len() - 1) as u16,
-            ptr: ptr as u64,
-        };
-
+        let ptr = DescriptorTablePointer::new()
+            .with_limit((size_of::<InterruptDescriptorTable>() - 1) as u16)
+            .with_ptr(ptr as u64);
+        debug!("loading IDT: {:?}", ptr);
         unsafe {
             asm!(
               "lidt [{}]",
-              in(reg) &arg
+              in(reg) &ptr
             );
         }
     }
 }
 
-#[repr(C)]
+#[repr(transparent)]
 #[derive(Debug)]
-pub struct LIDTArg {
-    size: u16,
-    ptr: u64,
+pub struct DescriptorTablePointer {
+    data: [u16; 10],
+}
+
+impl DescriptorTablePointer {
+    fn new() -> Self {
+        Self { data: [0; 10] }
+    }
+
+    fn with_limit(mut self, limit: u16) -> Self {
+        self.data[0] = limit;
+        self
+    }
+
+    fn with_ptr(mut self, ptr: u64) -> Self {
+        self.data[1] = (ptr & 0xffff) as u16;
+        self.data[2] = ((ptr >> 16) & 0xffff) as u16;
+        self.data[3] = ((ptr >> 32) & 0xffff) as u16;
+        self.data[4] = (ptr >> 48) as u16;
+        self
+    }
 }
 
 #[repr(C)]

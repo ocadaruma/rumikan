@@ -7,9 +7,12 @@ use core::panic::PanicInfo;
 
 use rumikan_kernel_lib::console::{init_global_console, Console};
 use rumikan_kernel_lib::graphics::{FrameBuffer, PixelColor};
-use rumikan_kernel_lib::interrupt::{DescriptorType, InterruptDescriptorAttribute, InterruptDescriptorTable, InterruptFrame, InterruptVector, notify_end_interrupt};
+use rumikan_kernel_lib::interrupt::{
+    notify_end_interrupt, DescriptorType, InterruptDescriptorAttribute, InterruptDescriptorTable,
+    InterruptFrame, InterruptVector,
+};
 use rumikan_kernel_lib::logger::{init_logger, LogLevel};
-use rumikan_kernel_lib::pci::{ClassCode, Pci};
+use rumikan_kernel_lib::pci::{ClassCode, MSIDeliveryMode, MSITriggerMode, Pci};
 use rumikan_kernel_lib::usb::Xhc;
 use rumikan_shared::graphics::FrameBufferInfo;
 
@@ -90,11 +93,28 @@ pub extern "C" fn _start(frame_buffer_info: FrameBufferInfo) -> ! {
         trace!("xHC mmio_base = 0x{:08x}", xhc_mmio_base);
         dev.switch_ehci2xhci_if_necessary(&pci);
 
-        let xhc = init_xhc(xhc_mmio_base);
-        loop {
-            if let Err(err) = xhc.poll() {
-                error!("Error while process event: {:?}", err);
-            }
+        let idt = InterruptDescriptorTable::get_mut();
+        idt.set(
+            InterruptVector::XHCI,
+            InterruptDescriptorAttribute::new()
+                .with_descriptor_type(DescriptorType::InterruptGate)
+                .with_descriptor_privilege_level(0),
+            xhc_interrupt_handler as u64,
+        );
+        idt.load();
+
+        let bsp_local_apic_id: u64 = 0xfee00020;
+        let bsp_local_apic_id = (unsafe { *(bsp_local_apic_id as *const u32) } >> 24) as u8;
+        if let Err(err) = dev.configure_msi_fixed_destination(
+            bsp_local_apic_id,
+            MSITriggerMode::Level,
+            MSIDeliveryMode::Fixed,
+            InterruptVector::XHCI,
+            0,
+        ) {
+            error!("Error during configuring MSI {:?}", err);
+        } else {
+            init_xhc(xhc_mmio_base);
         }
     }
 
@@ -143,17 +163,7 @@ fn panic(_info: &PanicInfo) -> ! {
 static mut XHC: Option<Xhc> = None;
 
 #[allow(clippy::fn_to_numeric_cast)]
-fn init_xhc(mmio_base: usize) -> &'static mut Xhc {
-    let idt = InterruptDescriptorTable::get_mut();
-    idt.set(
-        InterruptVector::XHCI,
-        InterruptDescriptorAttribute::new()
-            .with_descriptor_type(DescriptorType::InterruptGate)
-            .with_descriptor_privilege_level(0),
-        xhc_interrupt_handler as u64,
-    );
-    idt.load();
-
+fn init_xhc(mmio_base: usize) {
     let xhc = Xhc::new(mmio_base);
     let xhc = unsafe {
         XHC = Some(xhc);
@@ -161,6 +171,10 @@ fn init_xhc(mmio_base: usize) -> &'static mut Xhc {
     };
     xhc.initialize();
     xhc.run();
+
+    unsafe {
+        asm!("sti");
+    }
 
     for i in 1..=xhc.max_ports() {
         let mut port = xhc.port_at(i);
@@ -176,11 +190,25 @@ fn init_xhc(mmio_base: usize) -> &'static mut Xhc {
             }
         }
     }
-    xhc
 }
 
 extern "x86-interrupt" fn xhc_interrupt_handler(_frame: *mut InterruptFrame) {
     debug!("xhc interruption");
+    let xhc = unsafe { XHC.as_mut().unwrap() };
+    loop {
+        let ret = xhc.poll();
+        match ret {
+            Ok(opt) => {
+                if opt.is_none() {
+                    break;
+                }
+            }
+            Err(err) => {
+                error!("Error while process event: {:?}", err);
+                break;
+            }
+        }
+    }
 
     notify_end_interrupt();
 }
