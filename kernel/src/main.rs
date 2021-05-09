@@ -20,6 +20,7 @@ use rumikan_shared::graphics::FrameBufferInfo;
 extern crate rumikan_kernel_lib;
 
 #[no_mangle]
+#[allow(clippy::fn_to_numeric_cast)]
 pub extern "C" fn _start(frame_buffer_info: FrameBufferInfo) -> ! {
     let mut frame_buffer = FrameBuffer::new(frame_buffer_info);
     let console = Console::new(
